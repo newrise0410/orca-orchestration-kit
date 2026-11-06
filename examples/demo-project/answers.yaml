@@ -1,0 +1,14 @@
+# kit.py init --answers 로 넘기는 답변 (가상 예제)
+name: 할 일 관리 웹앱
+slug: todo
+main_branch: main
+modules:
+  - {key: api, name: API 서버, short: API}
+  - {key: web, name: 웹 UI, short: WEB}
+review_preset: none
+run: false
+remote: ""
+build_cmd: npm run build
+test_cmd: npm test
+restricted: "*.pdf,.orca/,customer/"
+summary: 개인용 할 일 관리 웹앱(가상 예제)을 개발하는 저장소다. 모듈은 API 서버(api/)와 웹 UI(web/) 둘이다.

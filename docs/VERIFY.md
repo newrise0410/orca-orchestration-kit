@@ -1,0 +1,76 @@
+# v0.1.0 검증 기록 (증적)
+
+| 항목 | 내용 |
+|---|---|
+| 일자 | 2026-11-06 |
+| 환경 | Linux, Python 3 + PyYAML 6.0.3, git, docker |
+| 원본 프로젝트 | 실전 프로젝트 저장소를 **읽기만** 했다. 검증 설정·출력은 `/tmp` 아래 임시 폴더에만 썼다. 검증 전후 원본의 HEAD와 작업 트리 상태가 같음을 확인했다 |
+
+## 1. DAG 검증기 (`tools/validate_dag.py`)
+
+| 대상 | 작업 | 의존 간선 | 시작점 | 끝점 | 최장 사슬 | 오류 | 경고 | 종료코드 |
+|---|---|---|---|---|---|---|---|---|
+| 예제 `examples/demo-project/orchestration/tasks.yaml` | 7 (W0 1 · G-0 1 · W1 2 · W2 2 · W3 1) | 7 | 1 | 1 | 5 | **0** | 0 | 0 |
+| 실전 프로젝트 tasks.yaml (읽기만) | 46 (W0 12 · G-0 1 · W1 28 · W2 3 · W3 2) | 87 | 2 | 7 | 11 | **0** | 11 | 0 |
+| 키트 템플릿 `templates/orchestration/tasks.yaml` | 9 | 12 | 1 | 1 | 7 | **0** | 0 | 0 |
+| init이 만든 W0 초안 (모듈 2) | 7 | 10 | 1 | 1 | 6 | **0** | 0 | 0 |
+
+- 실전 프로젝트 경고 11건의 내역: 웨이브 미지정 작업의 추정 역행 4건(G-0 뒤에 추가된 인프라 작업이 규칙상 W0로 추정됨 → `wave` 명시 권고), 동시 실행 가능한 작업끼리 `write_scope` 접두 겹침 7건(공용 시뮬 패키지 경로). 둘 다 정보성 경고이고 오류가 아니다.
+- 실패 사례 검증(임시 파일): 중복 ID, 없는 선행작업, 자기 의존, 2개 작업 순환, 한 작업 안의 중복 키(`status` 두 번)를 모두 오류로 잡고 종료코드 1을 냈다.
+- 작업 수가 작업 시작 시점(43)과 다른 것은 실전 프로젝트가 검증 중에도 다른 세션에서 진행 중이었기 때문이다.
+
+## 2. 명세 렌더링 (`tools/render_spec.py`)
+`examples/demo-project/make_demo.sh`가 예제 저장소에서 렌더링했다. 결과는 `examples/demo-project/orchestration/specs/`.
+
+| 명세 | 템플릿 | 확인한 것 |
+|---|---|---|
+| `R-API-001.md` | worker-spec (L2) | `perf: true` → 계기별 p50/p95 문구, 요구사항 2개, 쓰기 범위, 선행 G-0(merged), `git push origin HEAD:req/R-API-001` |
+| `R-WEB-001.md` | worker-spec (L2) | `env: [sim]` + `runtime.sim: false` → `sim.pending.md`('모의로 먼저, 실제로 다시') 블록, `{base}` 치환(int/web) |
+| `I-WEB.md` | integration-spec (L1) | 머지 절차(`[G]` 동기화 메시지, `--no-ff`, 스모크 실패 시 머지 거부), 증적 경로 |
+
+남은 자리표시자 없음(알려진 이름만 치환, 나머지 중괄호는 보존).
+
+## 3. 대시보드 생성기 (`tools/dashboard/build.py`)
+
+| 대상 | 설정 | 결과 | 종료코드 |
+|---|---|---|---|
+| 예제 (make_demo 저장소) | init이 만든 `orchestration/kit.yaml` | 작업 7 (merged 2 · running 1 · ready 1 · todo 3), RTM 3행, TBD 2건, 문서 8개 **경고 0**, 커밋 4, 브랜치 5, 증적 1 → `examples/demo-project/dashboard/index.html` | 0 |
+| 실전 프로젝트 (읽기만, 출력 `/tmp`) | `/tmp`의 별도 설정 파일(모듈 3, 메인 `master`, 검토 단계 4, 상위 요구사항 패턴) | 작업 46, RTM 44행 + 파생 5행, TBD 14건, 문서 179개 **경고 0**, 커밋 30, 브랜치 52, 증적 30 | 0 |
+| 검토 단계 `defense` 프리셋 설치본 | init 생성 kit.yaml | '검토 단계별 산출물' 카드 표시, 문서 경고 0 | 0 |
+
+- **동등성:** 같은 시점에 실전 프로젝트의 원래 생성기와 키트 생성기를 나란히 돌려 요약 수치(작업 상태 분포, RTM·TBD·문서·커밋·브랜치·증적 수)가 모두 같았다.
+- 원본 저장소용 설정 파일은 키트에 넣지 않았다(고유 정보 포함).
+
+## 4. 스킬 init (임시 디렉터리의 빈 git 저장소)
+```
+git init -b main <tmp>/empty
+kit.py init --target <tmp>/empty --answers examples/demo-project/answers.yaml --run --profile ros2 --dry-run
+kit.py init --target <tmp>/empty --answers examples/demo-project/answers.yaml --run --profile ros2
+kit.py bootstrap --target <tmp>/empty --dry-run
+```
+- `--dry-run`: 배치 계획 54줄(+) 출력, 대상에는 `.git` 외 아무것도 생기지 않음(종료코드 0).
+- 실제 설치: 파일 55개(계획 54 + `.gitignore`). 폴더: `docs/01_requirements` `02_interface` `03_design` `04_test` `05_reports` `06_evidence` `07_process/snapshots`, `orchestration/{sessions,specs,state,templates/blocks,tools/dashboard/systemd}`, `scripts/run/profiles/ros2`, `.orca-kit/installed.json`. 예제 배치 목록: `examples/demo-project/installed-tree.txt`.
+- bootstrap dry-run 출력(Orca 명령은 실행하지 않음):
+  - `[master-run]` `orca orchestration run-create --objective '할 일 관리 웹앱 마스터 Run (사용자 소통·결정)' --json`
+  - `[manager]` `orca orchestration worker-start --spec-file <tmp>/empty/.git/orca-kit/MANAGER.launch.md --task-title '작업관리 매니저' --display-name '매니저' --agent claude --worktree path:<tmp>/empty --json`
+  - `[abandon]` `orca orchestration worker-abandon --dispatch <manager_dispatch> --json`
+  - `[dashboard]` `setsid nohup <tmp>/empty/orchestration/tools/dashboard/serve.sh --orca -p 8765 > .git/orca-kit/dashboard.log 2>&1 &`
+- 추가 확인
+  - 설치본에서 `validate_dag` 오류 0, `render_spec I-API` 정상, 대시보드 생성 종료코드 0.
+  - `defense` 프리셋 + 원격 + ros2: `docs/01_SRR`~`04_CDR` 생성, RTM·TBD가 `01_SRR`에, W0 계약 작업의 쓰기 범위가 `docs/02_SFR/`, `run.conf`에 원격 기본값과 배포 제한 제외 패턴.
+  - `upgrade`: 설치 뒤 키트 템플릿을 바꾸고 설치본 파일 하나를 사용자가 고친 상태에서 미리보기 → '키트 갱신' 1건, '충돌' 1건과 unified diff. `--apply` → 갱신 파일은 교체, 충돌 파일은 `<파일>.kit-new`로 기록, 다시 미리보기하면 충돌만 남음.
+  - 심볼릭 링크로 연 스킬 경로에서 `kit.py`가 키트 본체를 찾음(설치 방식 검증, 실제 사용자 스킬 경로에는 설치하지 않음. `install.sh --dry-run`만 실행).
+  - `launch.sh --dry-run`: task-create → worker-start(L2는 `--base-branch int/<모듈>`, L1은 `--keep-open`) → `task_status.py` 순서 출력. `task_status.py`는 블록형 항목의 status 한 줄만 바꿈.
+  - `cleanup_worker.sh --dry-run`: 조건 불충족(워크트리 없음)이면 아무것도 지우지 않고 종료코드 1.
+  - `scripts/run/run.sh` (로컬 docker, ros2 프로필, 로컬 이미지): 전용 네트워크(`NetworkMode=<접두>-<워크트리>`, 라벨 `kit.isolated=1`), 컨테이너 안 `ROS_DOMAIN_ID`·`GZ_PARTITION`·전달 변수 확인, `RUN_HEAVY=1` 슬롯 획득, `--stop` 후 네트워크 제거.
+
+## 5. 반입 금지어 검사
+작업 지시서의 금지어 패턴(원 프로젝트 이름·모듈 약어·도메인 단어·내부 호스트·사설망 주소·개인 이메일·계정명, 10개 항목)으로
+`grep -rniE '<패턴>' --exclude-dir=.git .` 와 `git grep --cached -niE '<패턴>'`(커밋 대상 전체)를 돌렸다. 패턴 원문은 이 기록에 적지 않는다(적으면 이 문서가 걸린다).
+
+결과 **0건** (GNU grep, 커밋 직전). `.git/` 안의 4건은 원격 저장소 주소(git 메타데이터)이고 키트 파일이 아니다. 출처 표기 한 줄 예외도 쓰지 않았다(README는 '실전 프로젝트에서 검증'으로 표기).
+- 대소문자 무시 검사라 흔한 영단어 안의 철자도 걸린다. 대시보드 CSS는 해당 속성 이름을 CSS 이스케이프로 적었다(`docs/DESIGN-NOTES.md`).
+
+## 6. 하지 않은 것
+- 스킬 실제 설치(사용자가 정한다). 설치 명령: `./install.sh` (Orca 프로필 경로 `$ORCA_CLAUDE_CONFIG_DIR/skills/`), 일반 Claude Code는 `./install.sh --dir ~/.claude/skills`.
+- 실제 Orca Run 생성·워커 기동(dry-run으로 명령만 확인), 원격 머신 실행(ssh 대상 없음), `tailscale serve` 실제 공개, systemd 서비스 등록.

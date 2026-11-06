@@ -1,0 +1,47 @@
+# 대시보드 설정 예시. 보통은 orchestration/kit.yaml을 그대로 쓴다(이 키들이 kit.yaml에 들어 있다).
+# 다른 저장소에 대시보드만 쓰려면 이 파일을 복사해 고치고 --config로 넘긴다.
+project:
+  name: 예시 프로젝트
+  main_branch: main              # 머지 판정 기준 브랜치 (master도 가능)
+modules:                         # DAG 레인·RTM 섹션·필터. common·system은 없으면 자동 추가
+  - {key: api, name: API 서버, short: API}
+  - {key: web, name: 웹 UI, short: WEB}
+waves:                           # DAG 열 순서
+  - {key: W0, name: W0 계약·공통기반}
+  - {key: G-0, name: G-0 기반머지}
+  - {key: W1, name: W1 요구사항}
+  - {key: W2, name: W2 모듈통합}
+  - {key: W3, name: W3 체계통합}
+gates: [G-0]                     # 게이트: 선행 merged + 모든 L2 base(int/*) 존재 → merged
+integration_prefix: "int/"
+request_prefix: "req/"
+paths:
+  tasks: orchestration/tasks.yaml
+  docs: docs                     # 번호 폴더 루트
+  evidence: "docs/06_evidence/{id}/report.md"
+  evidence_dir: 06_evidence      # 이 폴더는 작업 ID 구조로 보여 준다
+  rtm: "docs/01_requirements/01_요구사항추적표_*.md"   # 글롭. 가장 최근(이름순 마지막) 파일을 쓴다
+  tbd: "docs/01_requirements/02_TBD관리대장_*.md"
+  skip_dirs: [snapshots]
+verification_stages:             # RTM 표의 단계 열 머리 (첫 번째로 RTM 표를 알아본다)
+  - {mark: "①", name: ① 로컬}
+  - {mark: "②", name: ② 스테이징}
+  - {mark: "③", name: ③ 운영 환경}
+rtm:
+  columns: {summary: 요약, verify: 검증, alloc: 예비 설계 할당, tbd: 관련 TBD}
+  ref_pattern: '^([A-Z][A-Z0-9]*(?:-[A-Z][A-Z0-9]*)*-)(\d+)((?:·\d+)*)$'   # TBD 표 'R-API-001·002' 펼치기
+  parent_pattern: null           # 세부 항목(a, b…)으로 나뉜 상위 요구사항 ID 패턴. 예: 'R-[A-Z]+-ETC-\d+'
+tbd:
+  columns: {id: 순번, reqs: 요구사양 식별자, kind: 구분, title: 제목, reason: 사유 및 계획, due: 확정 예정, state: 확정 여부}
+  open_state: 미확정
+  closed_state: 확정
+review_stages:                   # 선택 모듈. enabled: false면 카드 숨김
+  enabled: false
+  stages: []
+orca:
+  work_run: ""                   # --orca 기본 Run
+dashboard:
+  title: 예시 프로젝트 개발 현황
+  subtitle: 로컬·사설망 전용
+  port: 8765
+  storage_key: example-dash      # 브라우저 저장 키 접두(보기 설정 기억)

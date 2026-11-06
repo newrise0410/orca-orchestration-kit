@@ -1,0 +1,72 @@
+# 키트 파일 배치표 — skills/orca-orchestration-kit/scripts/kit.py가 읽는다.
+#   src:   키트 저장소 기준 경로
+#   dst:   대상 저장소 기준 경로. {{...}} 자리표시자를 쓸 수 있다(경로 안 YYYYMMDD는 설치일로 바뀐다)
+#   kind:  managed — 키트 소유. upgrade가 diff를 보여 주고 갱신한다
+#          seed    — 한 번만 깐다. 이후 프로젝트 소유(upgrade는 키트 쪽 변경만 알려 준다)
+#   module: core(항상) / run(실행 격리) / ros2(ROS 2 프로필) / review(검토 단계)
+#   render: true면 {{...}}를 채운다. keep: 설치 때 남겨 둘 자리표시자(부트스트랩에서 채움)
+#   mode:  실행 권한 등 (기본 644)
+version: 0.1.0
+
+files:
+  # ── 공통 규칙
+  - {src: templates/AGENTS.md, dst: AGENTS.md, kind: seed, module: core, render: true}
+  - {src: templates/CLAUDE.md, dst: CLAUDE.md, kind: seed, module: core}
+  # ── 세션 3계층
+  - {src: templates/sessions/MASTER.md, dst: orchestration/sessions/MASTER.md, kind: managed, module: core, render: true}
+  - {src: templates/sessions/MANAGER.md, dst: orchestration/sessions/MANAGER.md, kind: managed, module: core, render: true,
+     keep: [MASTER_RUN, WORK_RUN]}
+  - {src: templates/sessions/worker-spec.md, dst: orchestration/templates/worker-spec.md, kind: managed, module: core, render: true}
+  - {src: templates/sessions/integration-spec.md, dst: orchestration/templates/integration-spec.md, kind: managed, module: core, render: true}
+  # ── 오케스트레이션
+  - {src: templates/orchestration/README.md, dst: orchestration/README.md, kind: managed, module: core, render: true}
+  - {src: templates/orchestration/kit.yaml, dst: orchestration/kit.yaml, kind: seed, module: core, render: true}
+  - {src: templates/orchestration/templates/evidence.md, dst: orchestration/templates/evidence.md, kind: managed, module: core}
+  - {src: templates/orchestration/templates/blocks/_always.md, dst: orchestration/templates/blocks/_always.md, kind: managed, module: core, render: true}
+  - {src: templates/orchestration/templates/blocks/remote.md, dst: orchestration/templates/blocks/remote.md, kind: managed, module: run}
+  - {src: templates/orchestration/templates/blocks/remote.pending.md, dst: orchestration/templates/blocks/remote.pending.md, kind: managed, module: run}
+  - {src: templates/orchestration/templates/blocks/gpu.md, dst: orchestration/templates/blocks/gpu.md, kind: managed, module: run}
+  - {src: templates/orchestration/templates/blocks/sim.md, dst: orchestration/templates/blocks/sim.md, kind: managed, module: core}
+  - {src: templates/orchestration/templates/blocks/sim.pending.md, dst: orchestration/templates/blocks/sim.pending.md, kind: managed, module: core}
+  - {src: templates/orchestration/state/issues.md, dst: orchestration/state/issues.md, kind: seed, module: core}
+  - {src: templates/orchestration/state/dispatch.tsv, dst: orchestration/state/dispatch.tsv, kind: seed, module: core}
+  # (tasks.yaml은 kit.py가 W0 초안으로 생성한다: seed)
+  # ── 도구
+  - {src: tools/kitlib.py, dst: orchestration/tools/kitlib.py, kind: managed, module: core}
+  - {src: tools/kitcfg.py, dst: orchestration/tools/kitcfg.py, kind: managed, module: core, mode: "755"}
+  - {src: tools/validate_dag.py, dst: orchestration/tools/validate_dag.py, kind: managed, module: core, mode: "755"}
+  - {src: tools/render_spec.py, dst: orchestration/tools/render_spec.py, kind: managed, module: core, mode: "755"}
+  - {src: tools/task_status.py, dst: orchestration/tools/task_status.py, kind: managed, module: core, mode: "755"}
+  - {src: tools/launch.sh, dst: orchestration/tools/launch.sh, kind: managed, module: core, mode: "755"}
+  - {src: tools/cleanup_worker.sh, dst: orchestration/tools/cleanup_worker.sh, kind: managed, module: core, mode: "755"}
+  - {src: tools/sync_main.sh, dst: orchestration/tools/sync_main.sh, kind: managed, module: core, mode: "755"}
+  # ── 대시보드
+  - {src: tools/dashboard/build.py, dst: orchestration/tools/dashboard/build.py, kind: managed, module: core, mode: "755"}
+  - {src: tools/dashboard/serve.sh, dst: orchestration/tools/dashboard/serve.sh, kind: managed, module: core, mode: "755"}
+  - {src: tools/dashboard/snapshot.sh, dst: orchestration/tools/dashboard/snapshot.sh, kind: managed, module: core, mode: "755"}
+  - {src: tools/dashboard/README.md, dst: orchestration/tools/dashboard/README.md, kind: managed, module: core}
+  - {src: tools/dashboard/dashboard.example.yaml, dst: orchestration/tools/dashboard/dashboard.example.yaml, kind: managed, module: core}
+  - {src: tools/dashboard/systemd/orchestration-dashboard.service, dst: orchestration/tools/dashboard/systemd/orchestration-dashboard.service, kind: managed, module: core}
+  # ── 문서 체계
+  - {src: templates/docs/README.md, dst: docs/README.md, kind: seed, module: core, render: true}
+  - {src: templates/docs/requirements/01_요구사항추적표_YYYYMMDD.md, dst: "docs/{{REQ_FOLDER}}/01_요구사항추적표_YYYYMMDD.md", kind: seed, module: core, render: true}
+  - {src: templates/docs/requirements/02_TBD관리대장_YYYYMMDD.md, dst: "docs/{{REQ_FOLDER}}/02_TBD관리대장_YYYYMMDD.md", kind: seed, module: core, render: true}
+  - {src: templates/docs/evidence/README.md, dst: docs/06_evidence/README.md, kind: seed, module: core}
+  - {src: templates/docs/process/01_개발프로세스-지표_YYYYMMDD.md, dst: docs/07_process/01_개발프로세스-지표_YYYYMMDD.md, kind: seed, module: core, render: true}
+  - {src: templates/docs/process/02_의사결정기록_YYYYMMDD.md, dst: docs/07_process/02_의사결정기록_YYYYMMDD.md, kind: seed, module: core, render: true}
+  - {src: templates/docs/process/03_운영이슈-교훈_YYYYMMDD.md, dst: docs/07_process/03_운영이슈-교훈_YYYYMMDD.md, kind: seed, module: core, render: true}
+  # ── 실행 격리 (선택)
+  - {src: tools/run/run.sh, dst: scripts/run/run.sh, kind: managed, module: run, mode: "755"}
+  - {src: tools/run/run.conf.example, dst: scripts/run/run.conf, kind: seed, module: run, render: true}
+  - {src: tools/run/cleanup_hook.sh, dst: scripts/run/cleanup_hook.sh, kind: managed, module: run, mode: "755"}
+  - {src: tools/run/metrics.sh, dst: scripts/run/metrics.sh, kind: managed, module: run, mode: "755"}
+  - {src: tools/run/README.md, dst: scripts/run/README.md, kind: managed, module: run}
+  - {src: tools/run/profiles/ros2/profile.sh, dst: scripts/run/profiles/ros2/profile.sh, kind: managed, module: ros2}
+  - {src: tools/run/profiles/ros2/test.sh, dst: scripts/run/profiles/ros2/test.sh, kind: managed, module: ros2, mode: "755"}
+  - {src: tools/run/profiles/ros2/README.md, dst: scripts/run/profiles/ros2/README.md, kind: managed, module: ros2}
+
+# 빈 폴더 (.gitkeep)
+dirs: [orchestration/specs, docs/05_reports, docs/07_process/snapshots]
+
+# .gitignore에 넣을 줄 (표시 블록 안에서 관리)
+gitignore: [dashboard/, .runs/, "*.kit-new", __pycache__/]

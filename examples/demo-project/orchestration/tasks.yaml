@@ -1,0 +1,108 @@
+# 작업 매니페스트: Orca Task DAG의 정본 (orca-orchestration-kit 스키마 v1) — 가상 예제 "할 일 관리 웹앱"
+# 필드 설명은 키트 templates/orchestration/tasks.yaml 머리말 참고.
+# 작업 6개(F-01, R-API-001, R-WEB-001, I-API, I-WEB, S-01) + 게이트 1개(G-0)
+
+defaults:
+  stage: "①"
+  evidence: "docs/06_evidence/{id}/report.md"
+
+runtime:
+  sim: false        # 스테이징 API(공용 시험 인프라)가 아직 없다 → R-WEB-001은 모의 응답으로 먼저
+
+tasks:
+  # ───────────────── W0 계약·공통 기반 ─────────────────
+  - id: F-01
+    title: API 계약(OpenAPI)·공통 규약·모듈 골격
+    layer: L0
+    module: common
+    reqs: []
+    branch: int/common
+    base: main
+    deps: []
+    write_scope: [contracts/, docs/02_interface/, api/, web/, scripts/dev/]
+    acceptance: >
+      할 일 자원(Todo: id·title·done·due·updated_at)의 CRUD 엔드포인트와 오류 형식(RFC 7807)을 OpenAPI 3.1로 정의하고
+      스키마 검사가 통과한다. api/·web/ 골격(빈 라우터·빈 화면·설정 파일)과 npm build/test 스크립트가 통과한다.
+    status: merged
+
+  # ───────────────── G-0 ─────────────────
+  - id: G-0
+    title: 기반 머지 → int/api·int/web 생성
+    layer: L0
+    module: common
+    reqs: []
+    branch: main
+    base: main
+    deps: [F-01]
+    write_scope: []
+    acceptance: "int/common → main 머지, main에서 int/api·int/web 생성·푸시, 공통 스모크 통과"
+    status: merged
+
+  # ───────────────── W1 요구사항 ─────────────────
+  - id: R-API-001
+    title: 할 일 CRUD API
+    layer: L2
+    module: api
+    reqs: [R-API-001, R-API-002]
+    branch: req/R-API-001
+    base: int/api
+    deps: [G-0]
+    write_scope: [api/src/todos/, api/test/todos/]
+    acceptance: >
+      OpenAPI 계약 시험(생성·조회·수정·삭제·목록 페이지) 전부 통과, 빈 제목·없는 id에 400/404 반환,
+      목록 100건 조회 p95 50ms 이하(로컬, 계기: HTTP 요청 수신 → 응답 전송).
+    perf: true
+    status: running
+
+  - id: R-WEB-001
+    title: 할 일 목록·추가 화면 (모의 API로 먼저)
+    layer: L2
+    module: web
+    reqs: [R-WEB-001]
+    branch: req/R-WEB-001
+    base: int/web
+    deps: [G-0]
+    write_scope: [web/src/pages/todos/, web/test/todos/]
+    acceptance: >
+      목록 표시·추가·완료 토글 시나리오 3개 통과(계약 기반 모의 응답), API 오류 시 재시도 안내 표시,
+      키보드만으로 추가·토글 가능.
+    env: [sim]
+    status: todo
+
+  # ───────────────── W2 모듈 통합 ─────────────────
+  - id: I-API
+    title: API 서버 모듈 통합
+    layer: L1
+    module: api
+    reqs: []
+    branch: int/api
+    base: main
+    deps: [R-API-001]
+    write_scope: [api/bringup/, docs/06_evidence/I-API/]
+    acceptance: "req/R-API-* 전부 머지, 서버 기동·헬스 체크·계약 시험 통과"
+    status: todo
+
+  - id: I-WEB
+    title: 웹 UI 모듈 통합
+    layer: L1
+    module: web
+    reqs: []
+    branch: int/web
+    base: main
+    deps: [R-WEB-001]
+    write_scope: [web/bringup/, docs/06_evidence/I-WEB/]
+    acceptance: "req/R-WEB-* 전부 머지, 빌드 산출물 기동·화면 스모크 통과"
+    status: todo
+
+  # ───────────────── W3 체계 통합 ─────────────────
+  - id: S-01
+    title: 체계 통합 (API + 웹 종단)
+    layer: L0
+    module: system
+    reqs: [R-WEB-001, R-API-001]
+    branch: main
+    base: main
+    deps: [I-API, I-WEB]
+    write_scope: [system/, docs/06_evidence/S-01/]
+    acceptance: "int/* → main 머지, 실제 API로 목록·추가·완료 종단 시나리오 통과(모의 응답 제거)"
+    status: todo

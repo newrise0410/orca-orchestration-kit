@@ -1,0 +1,6 @@
+/tmp/kit-verify.e2ly/demo2/todo-app/orchestration/tasks.yaml
+  작업 7 · 의존 간선 7 · 시작점 1 · 끝점 1 · 최장 사슬 5
+  웨이브 W0 1, G-0 1, W1 2, W2 2, W3 1
+  계층 L0 3, L1 2, L2 2
+  상태 merged 2, running 1, todo 4
+  결과: 오류 0 · 경고 0

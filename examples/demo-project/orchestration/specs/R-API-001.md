@@ -1,0 +1,48 @@
+# 작업 R-API-001: 할 일 CRUD API
+
+당신은 할 일 관리 웹앱 개발의 **L2 요구사항 작업 세션**이다. 이 작업 하나만 수행한다.
+먼저 저장소 루트의 `AGENTS.md`(작업 규칙)와 `orchestration/README.md`(구조)를 읽어라.
+
+## 대상
+- 모듈: api (API 서버)
+- 충족·입증할 요구사항: R-API-001, R-API-002
+- 요구사항 요약: 요구사항 추적표(`docs/01_requirements/01_요구사항추적표_*.md`)의 해당 행
+- 관련 TBD: TBD 관리대장(`docs/01_requirements/02_TBD관리대장_*.md`) 참조
+
+## 브랜치
+- 작업 브랜치: `req/R-API-001` (기준: `int/api`). 워크트리는 Orca가 `int/api`에서 분기해 만들어 준다.
+  - Orca가 만든 로컬 브랜치 이름은 규칙과 다를 수 있다. 원격에는 반드시 `req/R-API-001`로 푸시한다: `git push origin HEAD:req/R-API-001`
+- 기준 브랜치가 갱신되면 `git fetch origin && git merge origin/int/api`로 따라간다(rebase·force push 금지).
+
+## 쓰기 범위 (이 밖은 읽기 전용)
+- `api/src/todos/`
+- `api/test/todos/`
+- 추가 허용: `docs/06_evidence/R-API-001/`, 그리고 자기 모듈의 시험 폴더
+- 여러 작업이 함께 쓰는 공용 파일(패키지 매니페스트, 의존성 목록, 진입점 등록, 모듈 README)은 꼭 필요한 줄만 추가하고, 기존 줄은 지우거나 재배열하지 마라. 바꾼 줄은 증적 보고서 5절에 적는다.
+- 쓰기 범위 밖을 고쳐야 하면 고치지 말고 `orca orchestration ask`로 요청하라. 답을 받을 때까지 그 부분은 모의(stub)로 진행하라.
+
+## 의존 작업
+- `G-0` 기반 머지 → int/api·int/web 생성 (status: merged)
+- merged인 선행 작업은 기준 브랜치에 들어 있다. 선행 작업의 경로는 읽기만 한다.
+
+## 완료 판정 (acceptance)
+OpenAPI 계약 시험(생성·조회·수정·삭제·목록 페이지) 전부 통과, 빈 제목·없는 id에 400/404 반환, 목록 100건 조회 p95 50ms 이하(로컬, 계기: HTTP 요청 수신 → 응답 전송).
+
+## 산출물·증적
+1. 빌드·시험 통과 로그 (`npm run build`, `npm test`)
+2. acceptance 시나리오 결과 (검증 단계 ①)
+3. 처리 지연 p50/p95를 계기별로 측정해 report.md 3절에 표로 남긴다
+4. 증적 보고서 `docs/06_evidence/R-API-001/report.md` (양식: `orchestration/templates/evidence.md`)
+5. `[R-API-001]` 접두 커밋을 작업 브랜치에 올리고 `git push origin HEAD:req/R-API-001`로 푸시한다.
+
+## 실행 환경
+- 빌드·시험은 정해진 스크립트로 한다: `npm run build`, `npm test`.
+
+## 금지·질문
+- 계약(인터페이스·공통 라이브러리), 단계 문서, `orchestration/`은 수정하지 마라. 변경이 필요하면 `ask`로 요청한다.
+- 요구사항 해석이 모호하면 추측으로 확정하지 말고 `ask`로 질문하라.
+- 시험 실패를 성공으로 보고하지 마라. 일부만 충족했으면 그대로 보고하라. 모의 입력으로 대신한 부분은 보고서에 '부분(모의)'으로 적는다.
+
+## 종료
+위 산출물을 갖추면 `worker_done`에 다음을 담아 보고한다: 결과(통과/부분/실패), 증적 경로, 측정치, 남은 이슈, 새 의존성·라이선스.
+비정상 종료(빌드 불가, 선행 작업 결함 등)는 `--outcome failed`로 보고하고 원인을 적는다.

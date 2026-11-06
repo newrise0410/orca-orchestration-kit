@@ -1,0 +1,16 @@
+# scripts/run/run.conf — run.sh 설정 (bash로 source된다). 환경변수(RUN_*)가 이 값보다 우선한다.
+RUN_PREFIX={{PROJECT_SLUG}}            # 컨테이너·네트워크 이름 접두 → <접두>-<워크트리>
+RUN_IMAGE_DEFAULT={{RUN_IMAGE}}        # 기본 실행 이미지 (대상 환경을 재현한다. 호스트 OS와 무관하게)
+RUN_REMOTE_DEFAULT={{REMOTE}}          # 원격 실행 기본값 user@host (비우면 로컬)
+RUN_REMOTE_DIR={{PROJECT_SLUG}}_ws     # 원격 홈 기준 동기화 폴더
+RUN_PROFILE={{RUN_PROFILE}}            # 격리 변수 훅 프로필 (profiles/<이름>/profile.sh). 예: ros2
+RUN_CPUS_LOCAL=4;  RUN_MEM_LOCAL=6g     # 로컬 기본 자원 상한
+RUN_CPUS_REMOTE=8; RUN_MEM_REMOTE=24g   # 원격 기본 자원 상한
+RUN_HEAVY_SLOTS=3                      # 무거운 작업 동시 실행 수 (실측 한도에 맞춘다)
+RUN_PASS_ENV='^(APP_|SMOKE_)'          # 컨테이너로 넘길 호스트 환경변수 이름 정규식
+# 원격에서 회수할 결과 폴더 (증적·원본 결과)
+RUN_PULL_DIRS=(docs/06_evidence .runs)
+# 원격으로 보내지 않을 것: VCS, 빌드 산출물, 캐시, 그리고 배포 제한 파일 패턴
+RUN_EXCLUDES=('/.git' '/.cache/' '/.orca/' '/build/' '/dist/' '/node_modules/' '/.runs/' {{RESTRICTED_EXCLUDES}})
+# 추가 docker run 인자 (예: --add-host, 장치 연결)
+RUN_DOCKER_ARGS=()

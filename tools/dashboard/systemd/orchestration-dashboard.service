@@ -1,0 +1,23 @@
+# systemd user 서비스 예시 — 로그인하지 않아도 대시보드를 유지한다.
+#   설치:
+#     mkdir -p ~/.config/systemd/user
+#     sed "s#@REPO@#$PWD#g; s#@ORCA@#$ORCA_CLI_COMMAND#g" orchestration/tools/dashboard/systemd/orchestration-dashboard.service \
+#       > ~/.config/systemd/user/<프로젝트>-dashboard.service
+#     systemctl --user daemon-reload && systemctl --user enable --now <프로젝트>-dashboard.service
+#     loginctl enable-linger "$USER"     # (선택) 로그아웃 뒤에도 유지
+#   확인: systemctl --user status <프로젝트>-dashboard.service ; journalctl --user -u <프로젝트>-dashboard -f
+[Unit]
+Description=orchestration-kit dashboard (@REPO@)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=@REPO@
+# --orca를 쓰려면 Orca CLI 경로를 넘긴다. 쓰지 않으면 이 줄과 --orca를 지운다
+Environment=ORCA_CLI_COMMAND=@ORCA@
+ExecStart=@REPO@/orchestration/tools/dashboard/serve.sh --orca -i 30
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

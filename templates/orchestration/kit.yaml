@@ -1,0 +1,74 @@
+# orca-orchestration-kit 프로젝트 설정 — 키트 도구(render_spec, validate_dag, launch, cleanup, 대시보드)가 읽는다.
+# init이 만들고, 이후에는 매니저가 고친다. upgrade는 이 파일을 덮어쓰지 않는다(새 키만 알려 준다).
+kit_version: "{{KIT_VERSION}}"
+
+project:
+  name: "{{PROJECT_NAME}}"
+  slug: "{{PROJECT_SLUG}}"           # 컨테이너·네트워크·로컬 저장소 이름 접두
+  main_branch: "{{MAIN_BRANCH}}"
+  commit_email: "{{COMMIT_EMAIL}}"   # 공용 주소. 개인 이메일 금지(확인 훅이 자율 실행을 멈춘다)
+  build_cmd: "{{BUILD_CMD}}"
+  test_cmd: "{{TEST_CMD}}"
+
+# 모듈 = int/<key> 통합 브랜치 = L1 통합 세션 1개. common·system은 예약어(공통 기반·체계 통합)
+modules:
+{{MODULES_YAML}}
+
+waves:
+  - {key: W0, name: W0 계약·공통기반}
+  - {key: G-0, name: G-0 기반머지}
+  - {key: W1, name: W1 요구사항}
+  - {key: W2, name: W2 모듈통합}
+  - {key: W3, name: W3 체계통합}
+gates: [G-0]
+
+paths:
+  tasks: orchestration/tasks.yaml
+  specs: orchestration/specs
+  templates: orchestration/templates
+  docs: docs
+  evidence: "docs/06_evidence/{id}/report.md"
+  evidence_dir: 06_evidence
+  rtm: "docs/{{REQ_FOLDER}}/01_요구사항추적표_*.md"
+  tbd: "docs/{{REQ_FOLDER}}/02_TBD관리대장_*.md"
+  skip_dirs: [snapshots]
+
+# 명세 템플릿 선택 (layer별). 없으면 default
+spec_templates:
+  L1: integration-spec.md
+  default: worker-spec.md
+
+# 명세 문구
+spec_text:
+  perf_line: "처리 지연 p50/p95를 계기별로 측정해 report.md 3절에 표로 남긴다"
+  no_perf_line: "처리 지연 측정은 필수가 아니다(해당 시 기록)"
+
+# RTM 검증 단계 칸 (요구사항 추적표의 열 머리와 같아야 한다)
+verification_stages:
+{{VSTAGES_YAML}}
+
+# 검토 단계(선택 모듈). enabled: false면 대시보드 카드와 단계 폴더를 쓰지 않는다
+review_stages:
+  enabled: {{REVIEW_ENABLED}}
+  stages:
+{{REVIEW_STAGES_YAML}}
+
+orca:
+  agent: claude                 # 워커 에이전트
+  repo: ""                      # worker-start --repo 값 (예: id:<repoId>). `orca repo list --json`
+  master_run: "{{MASTER_RUN}}"  # 마스터 Run (매니저 보고 수신처)
+  work_run: "{{WORK_RUN}}"      # 매니저의 작업 Run (대시보드 --orca, launch·cleanup 기본값)
+  manager_dispatch: ""          # 매니저 dispatch (worker-abandon 대상)
+
+# 실행 격리 모듈(선택). 상세 설정은 scripts/run/run.conf
+run:
+  enabled: {{RUN_ENABLED}}
+  remote: "{{REMOTE}}"           # user@host. 비우면 로컬 컨테이너
+  profile: "{{RUN_PROFILE}}"     # 예: ros2 (scripts/run/profiles/<이름>)
+  cleanup_hook: "{{CLEANUP_HOOK}}"
+
+dashboard:
+  title: "{{PROJECT_NAME}} 개발 현황"
+  subtitle: "로컬·사설망 전용"
+  port: 8765
+  storage_key: "{{PROJECT_SLUG}}-dash"

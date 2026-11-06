@@ -1,0 +1,1 @@
+- 빌드·시험은 정해진 스크립트로 한다: `{{BUILD_CMD}}`, `{{TEST_CMD}}`.{{CONTAINER_NOTE}}

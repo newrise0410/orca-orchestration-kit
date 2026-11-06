@@ -1,0 +1,75 @@
+# 검토 단계 선택 모듈 프리셋. kit.py init --review-preset <이름>
+# folder: docs 아래 폴더 이름(번호 포함), artifacts: 대시보드가 파일명 키워드로 산출물 유무를 찾는다
+presets:
+  defense:   # 방산·체계 개발 관행 (요구 → 기능 → 기본설계 → 상세설계 검토회의)
+    - code: SRR
+      name: 체계요구조건검토
+      folder: 01_SRR
+      purpose: 요구사항 이해 일치, TBD 식별
+      entry: 요구 문서 접수
+      artifacts:
+        - {name: 요구사항 추적표, keywords: [요구사항추적표, 추적표, RTM]}
+        - {name: TBD/TBC 관리대장, keywords: [TBD, TBC]}
+        - {name: 운용개념, keywords: [운용개념, OCD, CONOPS]}
+        - {name: 개발환경 구축 결과, keywords: [개발환경]}
+    - code: SFR
+      name: 체계기능검토
+      folder: 02_SFR
+      purpose: 기능 기준선 확정
+      entry: SRR 조치사항 종결
+      artifacts:
+        - {name: SW 요구사항명세 (SRS), keywords: [SRS, 요구사항명세]}
+        - {name: 인터페이스 요구 (IRS·ICD), keywords: [IRS, ICD, 인터페이스]}
+        - {name: 기능 분할·할당, keywords: [기능분할, 기능할당, 기능-분할, 기능-할당]}
+    - code: PDR
+      name: 기본설계검토
+      folder: 03_PDR
+      purpose: 상위 설계 확정
+      entry: 기능 기준선 승인
+      artifacts:
+        - {name: SW 구조설계, keywords: [구조설계, SAD]}
+        - {name: 프로토타입 결과, keywords: [프로토타입]}
+        - {name: 자원·지연 예산, keywords: [예산, budget]}
+    - code: CDR
+      name: 상세설계검토
+      folder: 04_CDR
+      purpose: 상세 설계 확정, 시험 준비
+      entry: 할당 기준선 승인
+      artifacts:
+        - {name: 상세설계 (SDD), keywords: [SDD, 상세설계]}
+        - {name: 인터페이스 설계 (IDD), keywords: [IDD, 인터페이스설계]}
+        - {name: 시험계획·절차서, keywords: [시험계획, 시험절차, STP, STD]}
+  product:   # 일반 제품 개발 — 같은 4단계 구조에 이름만 바꿨다
+    - code: REQ
+      name: 요구 정리
+      folder: 01_REQ
+      purpose: 요구 이해 일치, 미정 항목 식별
+      entry: 요구 접수
+      artifacts:
+        - {name: 요구사항 추적표, keywords: [요구사항추적표, RTM]}
+        - {name: TBD/TBC 관리대장, keywords: [TBD, TBC]}
+        - {name: 사용 시나리오, keywords: [시나리오, 유스케이스]}
+    - code: SPEC
+      name: 기능 정의
+      folder: 02_SPEC
+      purpose: 기능·인터페이스 기준선 확정
+      entry: 요구 정리 완료
+      artifacts:
+        - {name: 기능 명세, keywords: [기능명세, PRD, SRS]}
+        - {name: 인터페이스 계약, keywords: [API, ICD, 계약, 인터페이스]}
+    - code: DESIGN
+      name: 설계 검토
+      folder: 03_DESIGN
+      purpose: 구조 설계 확정
+      entry: 기능 기준선 승인
+      artifacts:
+        - {name: 구조 설계, keywords: [구조설계, 아키텍처]}
+        - {name: 성능·비용 예산, keywords: [예산, budget]}
+    - code: RELEASE
+      name: 출시 준비
+      folder: 04_RELEASE
+      purpose: 시험 완료, 출시 판정
+      entry: 설계 승인
+      artifacts:
+        - {name: 시험계획·결과, keywords: [시험계획, 시험결과]}
+        - {name: 출시 점검표, keywords: [출시, 릴리스]}

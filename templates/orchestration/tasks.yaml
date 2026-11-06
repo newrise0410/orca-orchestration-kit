@@ -1,0 +1,150 @@
+# 작업 매니페스트: Orca Task DAG의 정본 (orca-orchestration-kit 스키마 v1)
+#
+# 작업 항목 필드
+#  - id:          작업 ID. 고유해야 한다. L2는 요구사항 ID를 그대로 쓰고, 큰 요구사항은 접미사(a, b, c)로 나눈다.
+#                 관례: F-nn 공통 기반·인프라(L0) / G-n 게이트 / R-<모듈>-nnn 요구사항(L2) / I-<모듈> 모듈 통합(L1) / S-nn 체계 통합(L0)
+#  - title:       한 줄 제목
+#  - layer:       L0(매니저 소유: 공통 기반·게이트·체계 통합) / L1(모듈 통합, 상시) / L2(요구사항 1개 = 세션 1개)
+#  - module:      orchestration/kit.yaml의 modules[].key 중 하나. common = 공통, system = 체계 (예전 이름 product도 읽는다)
+#  - wave:        (선택) W0 / G-0 / W1 / W2 / W3. 없으면 규칙으로 정한다: G-* → G-0, L2 → W1, L1 → W2, system·S-* → W3, 나머지 W0
+#  - reqs:        이 작업이 충족·입증하는 요구사항 ID 목록 (RTM 연결)
+#  - branch/base: 작업 브랜치와 분기 기준. L2: req/<ID> ← int/<모듈>, L1: int/<모듈> ← main, W0: int/common ← main
+#  - deps:        선행 작업 ID 목록 (Orca --deps로 변환). 없는 ID·순환은 validate_dag.py가 오류로 잡는다
+#  - write_scope: 이 작업이 수정할 수 있는 경로 (그 밖은 읽기 전용). 쓰기 범위 소유권은 orchestration/README.md 4장
+#  - acceptance:  완료 판정 시나리오 (검증 단계 ① 기준). 측정 가능한 문장으로 쓴다
+#  - perf:        true면 처리 지연 p50/p95 측정 필수
+#  - env:         (선택) 명세에 넣을 실행 환경 블록 이름 목록. orchestration/templates/blocks/<이름>.md
+#                 runtime.<이름>이 false면 <이름>.pending.md(있을 때)를 대신 넣는다 → '모의로 먼저, 실제로 다시'
+#  - status:      todo / ready / running / review / merged (투입 running → 증적 review → 머지 merged)
+#
+# 검증: python3 orchestration/tools/validate_dag.py   (중복 ID · 없는 deps · 순환 · 필드 형식)
+# 명세: python3 orchestration/tools/render_spec.py <ID> | --ready
+
+defaults:
+  stage: "①"
+  evidence: "docs/06_evidence/{id}/report.md"
+
+# 실행 환경 준비 상태 (render_spec.py가 env 블록 선택에 쓴다)
+runtime:
+  remote: false      # 원격 실행(scripts/run, RUN_REMOTE)을 쓸 수 있는가
+  sim: false         # 예: 시뮬·스테이징 같은 공용 시험 인프라가 기준 브랜치에 들어왔는가
+
+tasks:
+  # ───────────────── W0 계약·공통 기반 (L0, int/common) ─────────────────
+  - id: F-01
+    title: 계약 정의 (인터페이스·스키마·공통 규약)
+    layer: L0
+    module: common
+    reqs: []
+    branch: int/common
+    base: main
+    deps: []
+    write_scope: [contracts/, docs/02_interface/]
+    acceptance: >
+      모듈 사이의 모든 인터페이스(요청·응답·이벤트·오류 형식)와 공통 규약(이름, 시각, 식별자, 로그 형식)을
+      정의하고 문서화한다. 계약 검사(스키마 검증·코드 생성)가 통과한다.
+    status: todo
+
+  - id: F-02
+    title: 공통 라이브러리 (로그·설정·헬스·오류 처리)
+    layer: L0
+    module: common
+    reqs: []
+    branch: int/common
+    base: main
+    deps: [F-01]
+    write_scope: [libs/common/]
+    acceptance: "구조화 로그, 설정 로더, 헬스 체크, 처리시간 측정 API를 제공하고 단위시험이 통과한다."
+    status: todo
+
+  - id: F-03
+    title: 모듈 골격·빌드/시험 스크립트
+    layer: L0
+    module: common
+    reqs: []
+    branch: int/common
+    base: main
+    deps: [F-01, F-02]
+    write_scope: [modules/alpha/, modules/beta/, scripts/dev/]
+    acceptance: >
+      tasks.yaml의 모든 L2 작업이 쓸 골격(빈 진입점, 설정 파일, 기동 스크립트)을 미리 만들어 같은 파일을 두 작업이
+      새로 만들지 않게 한다. 전체 빌드·시험 스크립트가 통과한다.
+    status: todo
+
+  # ───────────────── G-0 기반 머지 (L0) ─────────────────
+  - id: G-0
+    title: 기반 머지 → int/<모듈> 생성
+    layer: L0
+    module: common
+    reqs: []
+    branch: main
+    base: main
+    deps: [F-01, F-02, F-03]
+    write_scope: []
+    acceptance: "int/common → main 머지, main에서 int/alpha·int/beta 생성·푸시, 공통 스모크 통과"
+    status: todo
+
+  # ───────────────── W1 요구사항 (L2, 병렬) ─────────────────
+  - id: R-ALPHA-001
+    title: alpha 모듈 첫 기능
+    layer: L2
+    module: alpha
+    reqs: [R-ALPHA-001]
+    branch: req/R-ALPHA-001
+    base: int/alpha
+    deps: [G-0]
+    write_scope: [modules/alpha/feature1/]
+    acceptance: "기능 시나리오 3개 통과, 오류 입력 처리 확인"
+    perf: true
+    status: todo
+
+  - id: R-BETA-001
+    title: beta 모듈 첫 기능 (alpha 계약 사용, 모의 입력으로 먼저)
+    layer: L2
+    module: beta
+    reqs: [R-BETA-001]
+    branch: req/R-BETA-001
+    base: int/beta
+    deps: [G-0]
+    write_scope: [modules/beta/feature1/]
+    acceptance: "alpha 모의 응답으로 화면·흐름 시나리오 통과"
+    env: [sim]
+    status: todo
+
+  # ───────────────── W2 모듈 통합 (L1, 상시) ─────────────────
+  - id: I-ALPHA
+    title: alpha 모듈 통합
+    layer: L1
+    module: alpha
+    reqs: []
+    branch: int/alpha
+    base: main
+    deps: [R-ALPHA-001]
+    write_scope: [modules/alpha/bringup/, docs/06_evidence/I-ALPHA/]
+    acceptance: "req/R-ALPHA-* 전부 머지, 모듈 종단 스모크 통과"
+    status: todo
+
+  - id: I-BETA
+    title: beta 모듈 통합
+    layer: L1
+    module: beta
+    reqs: []
+    branch: int/beta
+    base: main
+    deps: [R-BETA-001]
+    write_scope: [modules/beta/bringup/, docs/06_evidence/I-BETA/]
+    acceptance: "req/R-BETA-* 전부 머지, 모듈 종단 스모크 통과"
+    status: todo
+
+  # ───────────────── W3 체계 통합 (L0) ─────────────────
+  - id: S-01
+    title: 체계 통합 (종단 시나리오)
+    layer: L0
+    module: system
+    reqs: []
+    branch: main
+    base: main
+    deps: [I-ALPHA, I-BETA]
+    write_scope: [system/, docs/06_evidence/S-01/]
+    acceptance: "int/* → main 머지, 모듈 전체 종단 시나리오 통과"
+    status: todo

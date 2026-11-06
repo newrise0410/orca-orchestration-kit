@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="build-id" content="20261106225002597158">
+<meta name="robots" content="noindex">
+<title>할 일 관리 웹앱 개발 현황</title>
+<style>
+:root{
+--bg:#f5f6f8;--panel:#fff;--fg:#1c2126;--muted:#5f6a75;--line:#d9dee3;--line2:#eceff2;--accent:#2d5f8f;
+--code:#eef1f4;--lane0:#fafbfc;--lane1:#f2f4f6;
+--st-todo:#8b949d;--st-ready:#3a72ad;--st-running:#b4761d;--st-review:#7656a6;--st-merged:#2e7d55;
+--vm-pass:#2e7d55;--vm-prog:#b4761d;--vm-fail:#b42318;--vm-none:#d5dade;--warn:#a65b06;--bad:#b42318}
+@media (prefers-color-scheme:dark){:root{color-scheme:dark;
+--bg:#131619;--panel:#1a1e22;--fg:#d8dde2;--muted:#97a1ab;--line:#2c3237;--line2:#23292e;--accent:#79acdd;
+--code:#22282d;--lane0:#171b1f;--lane1:#1c2125;
+--st-todo:#6f7881;--st-ready:#5a91cc;--st-running:#d39a3a;--st-review:#9d80cc;--st-merged:#4aa877;
+--vm-pass:#4aa877;--vm-prog:#d39a3a;--vm-fail:#ec6a5e;--vm-none:#3a4147;--warn:#e0a24a;--bad:#ec6a5e}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.5 system-ui,-apple-system,"Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif;overflow-x:hidden;word-break:keep-all;overflow-wrap:break-word}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code,.mono{font-family:ui-monospace,SFMono-Regular,"D2Coding",Menlo,Consolas,monospace;font-size:.92em}
+code{background:var(--code);padding:0 3px;border-radius:3px;overflow-wrap:anywhere}
+code.blk{display:inline-block;margin:0 4px 3px 0}
+.muted{color:var(--muted)}.small{font-size:11.5px}.nowrap{white-space:nowrap}
+.warn{color:var(--warn)}.ok{color:var(--st-merged)}.badwarn{color:var(--bad);font-size:11px;border:1px solid;border-radius:3px;padding:0 4px}
+header.top{display:flex;flex-wrap:wrap;gap:4px 16px;al\69gn-items:baseline;padding:10px 16px 6px;background:var(--panel);border-bottom:1px solid var(--line)}
+.brand{display:flex;flex-wrap:wrap;gap:2px 10px;al\69gn-items:baseline}
+h1{font-size:15px;margin:0;font-weight:650}
+.meta{display:flex;flex-wrap:wrap;gap:2px 14px;font-size:12px;color:var(--muted);min-width:0}
+.meta b{color:var(--fg);font-weight:600}.meta .hs{overflow-wrap:anywhere}
+#newbuild{font-size:12px;color:var(--warn)}#newbuild button{font:inherit;margin-left:6px}
+nav.tabs{position:sticky;top:0;z-index:5;display:flex;gap:2px;overflow-x:auto;background:var(--panel);border-bottom:1px solid var(--line);padding:0 12px;scrollbar-width:thin}
+.tab{flex:0 0 auto;padding:8px 12px;color:var(--muted);border-bottom:2px solid transparent;white-space:nowrap}
+.tab:hover{text-decoration:none;color:var(--fg)}
+.tab[aria-selected=true]{color:var(--fg);border-bottom-color:var(--accent);font-weight:600}
+.cnt{font-size:11px;color:var(--muted);font-weight:400}
+main{padding:12px 16px 24px;max-width:1680px;margin:0 auto}
+footer{padding:8px 16px 16px;overflow-wrap:anywhere}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:10px 12px;margin:0 0 12px;min-width:0}
+.card h3{font-size:13px;margin:0 0 8px;font-weight:650}
+h4{font-size:12.5px;margin:14px 0 4px}
+.grid2{display:grid;grid-template-columns:minmax(0,1fr);gap:0 12px}
+@media(min-width:980px){.grid2{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
+.kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-bottom:12px}
+@media(max-width:400px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px 10px;min-width:0}
+.kl{font-size:11.5px;color:var(--muted)}.kv{font-size:19px;font-weight:650;font-variant-numeric:tabular-nums}.ks{font-size:11px;color:var(--muted);overflow-wrap:anywhere}
+.tw{overflow-x:auto;max-width:100%}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th,td{padding:4px 8px;border-bottom:1px solid var(--line2);text-al\69gn:left;vertical-al\69gn:top}
+th{font-weight:600;color:var(--muted);font-size:11.5px;white-space:nowrap;background:var(--panel)}
+td{overflow-wrap:break-word}
+table.compact td:first-child{white-space:nowrap}
+table.rtm{min-width:760px}#tbd-table{min-width:820px}#dag-table{min-width:760px}table.gitc{min-width:640px}table.doc-table{min-width:460px}
+table.rtm td:nth-child(2){min-width:200px}#tbd-table td:nth-child(5){min-width:220px}
+table.compact td,table.compact th{padding:3px 6px}
+td.num,th.num{text-al\69gn:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.z1{color:var(--muted);opacity:.55}
+tr.sum td{font-weight:600;border-top:1px solid var(--line)}
+tbody tr:hover{background:var(--lane1)}
+tr.flash{animation:flash 2s ease-out}
+@keyframes flash{from{background:color-mix(in srgb,var(--accent) 22%,transparent)}to{background:transparent}}
+.bar{display:flex;height:8px;background:var(--line2);border-radius:2px;overflow:hidden;min-width:60px;margin:5px 0}
+.bar .seg{display:block;height:100%}
+.st-todo{--c:var(--st-todo)}.st-ready{--c:var(--st-ready)}.st-running{--c:var(--st-running)}.st-review{--c:var(--st-review)}.st-merged{--c:var(--st-merged)}
+.vm-●{--c:var(--vm-pass)}.vm-◐{--c:var(--vm-prog)}.vm-✕{--c:var(--vm-fail)}.vm--{--c:var(--vm-none)}
+.seg{background:var(--c)}
+.st{display:inline-block;font-size:11px;line-height:16px;padding:0 5px;border-radius:3px;border:1px solid var(--c);color:var(--c);white-space:nowrap}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--c);margin:0 4px 1px 2px;vertical-al\69gn:middle}
+.legend{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11.5px;color:var(--muted);margin-top:6px;al\69gn-items:center}
+.bdgi{display:inline-block;font-style:normal;font-size:10px;line-height:14px;min-width:18px;text-al\69gn:center;border-radius:7px;background:var(--fg);color:var(--panel);margin-right:4px}
+td.vs,th.vs{text-al\69gn:center;width:28px;white-space:nowrap}
+td.vs{color:var(--c);font-weight:600}td.vm--{color:var(--muted);font-weight:400}
+.deps a{margin-right:4px;white-space:nowrap}
+sup.open{color:var(--st-running);font-size:8px}
+.ref.tip{border-color:var(--accent);color:var(--fg)}
+.tag,.ref{display:inline-block;font-size:11px;padding:0 4px;border:1px solid var(--line);border-radius:3px;color:var(--muted);white-space:nowrap;margin:0 3px 2px 0}
+td.refs{max-width:280px}
+ul.tlist,ul.alerts,ul.plain,ol.src{margin:0;padding-left:18px}
+ul.tlist li,ul.alerts li{margin:2px 0}
+ul.alerts li{overflow-wrap:anywhere}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px 16px;al\69gn-items:center;margin-bottom:8px}
+.seg-btns,.filters{display:flex;flex-wrap:wrap;gap:4px;al\69gn-items:center}
+.filters{margin-bottom:8px}
+.fl{font-size:11.5px;color:var(--muted);margin:0 2px 0 8px}.fl:first-child{margin-left:0}
+button{font:inherit;font-size:12px;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
+button[aria-pressed=true]{background:var(--fg);color:var(--panel);border-color:var(--fg)}
+.dag-wrap{overflow:auto;border:1px solid var(--line);border-radius:6px;background:var(--panel);max-height:calc(100vh - 150px)}
+svg.dag{display:block;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif}
+.lane0{fill:var(--lane0)}.lane1{fill:var(--lane1)}
+.lanel{font-size:11px;fill:var(--muted);font-weight:600}
+.wh{fill:var(--line2)}.wht{font-size:11.5px;fill:var(--fg);font-weight:600}
+.edge{fill:none;stroke:var(--muted);stroke-width:1;opacity:.35;marker-end:url(#ah)}
+.ahp{fill:var(--muted)}.ahp2{fill:var(--accent)}
+.node{cursor:pointer}
+.node .nb{fill:var(--panel);stroke:var(--line)}
+.node .ns{fill:var(--c)}
+.node .nid{font-size:11px;font-weight:650;fill:var(--fg);font-family:ui-monospace,Menlo,Consolas,monospace}
+.node .nt{font-size:11px;fill:var(--muted)}
+.node .bdg{fill:var(--fg)}.node .bdgt{font-size:10px;fill:var(--panel);font-weight:600}
+.node .perf{font-size:9px;fill:var(--muted)}
+.node.st-merged .nb{fill:color-mix(in srgb,var(--st-merged) 8%,var(--panel))}
+.node.st-running .nb,.node.st-review .nb{stroke:var(--c)}
+.node:hover .nb,.node:focus .nb{stroke:var(--accent)}
+.node:focus{outline:none}
+svg.focus .edge{opacity:.07}
+svg.focus .edge.hl{opacity:1;stroke:var(--accent);stroke-width:1.6;marker-end:url(#ah2)}
+svg.focus .node{opacity:.35}
+svg.focus .node.nbh,svg.focus .node.sel{opacity:1}
+.node.sel .nb{stroke:var(--accent);stroke-width:2}
+#drawer{position:fixed;top:0;right:0;bottom:0;width:min(580px,100vw);background:var(--panel);border-left:1px solid var(--line);box-shadow:-4px 0 18px rgba(0,0,0,.12);transform:translateX(105%);transition:transform .16s ease-out;z-index:20;overflow-y:auto;overscroll-behavior:contain}
+#drawer.open{transform:none}
+.dbar{position:sticky;top:0;display:flex;justify-content:flex-end;padding:6px 10px;background:var(--panel);border-bottom:1px solid var(--line2)}
+#dbody{padding:4px 16px 24px}
+.detail h2{font-size:15px;margin:4px 0 8px}
+.dh{display:flex;gap:8px;al\69gn-items:center;margin-top:8px}
+dl.kv{display:grid;grid-template-columns:minmax(90px,max-content) minmax(0,1fr);gap:4px 12px;margin:0;font-size:12.5px}
+dl.kv dt{color:var(--muted);font-size:11.5px}dl.kv dd{margin:0;overflow-wrap:anywhere}
+@media(max-width:480px){dl.kv{grid-template-columns:minmax(0,1fr)}dl.kv dd{margin-bottom:4px}}
+.sk{display:inline-block;min-width:64px;font-size:11px;color:var(--muted)}
+ol.src li{margin:2px 0;overflow-wrap:anywhere}
+.docs-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:0 12px;al\69gn-items:start}
+@media(min-width:1180px){.docs-grid{grid-template-columns:minmax(0,600px) minmax(0,1fr)}.doc-view{position:sticky;top:44px;max-height:calc(100vh - 56px);overflow:auto}}
+tr.cur td{background:color-mix(in srgb,var(--accent) 10%,transparent)}
+.doc-head{border-bottom:1px solid var(--line2);padding-bottom:4px;margin-bottom:8px;overflow-wrap:anywhere}
+.md{font-size:13px;overflow-wrap:break-word}
+.md h1{font-size:17px;margin:6px 0 10px}.md h2{font-size:15px;margin:18px 0 8px;padding-bottom:3px;border-bottom:1px solid var(--line2)}
+.md h3{font-size:13.5px;margin:14px 0 6px}.md h4{font-size:13px}
+.md p{margin:6px 0}.md ul,.md ol{margin:4px 0;padding-left:22px}
+.md pre{background:var(--code);padding:8px 10px;border-radius:4px;overflow:auto;font-size:12px;line-height:1.45}
+.md pre code{background:none;padding:0;overflow-wrap:normal}
+.md blockquote{margin:6px 0;padding:2px 10px;border-left:3px solid var(--line);color:var(--muted)}
+.md table{margin:6px 0}.md hr{border:0;border-top:1px solid var(--line);margin:12px 0}
+.xref{border-bottom:1px dotted var(--muted)}
+@media(max-width:600px){main{padding:10px 12px 20px}header.top{padding:8px 12px 6px}nav.tabs{padding:0 6px}th.wide,td.wide{display:none}table.rtm{min-width:600px}.card{padding:8px 10px}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><h1>할 일 관리 웹앱 개발 현황</h1><span class="muted small">로컬·사설망 전용</span></div>
+  <div class="meta"><span title="생성 시각">생성 2026-11-06 22:50:02 KST</span><span>브랜치 <b class="mono">main</b></span><span title="[G] Merge int/common → main">HEAD <b class="mono">0112217</b> <span class="hs">[G] Merge int/common → main</span></span><span title="?? orchestration/specs/I-WEB.md
+?? orchestration/specs/R-API-001.md
+?? orchestration/specs/R-WEB-001.md">작업 트리 변경 3건</span><span class="" title="Orca 미반영">Orca 미반영</span></div>
+  <div id="newbuild" hidden>새 빌드가 있습니다 <button type="button" id="reload">새로고침</button></div>
+</header>
+<nav class="tabs" role="tablist"><a class="tab" href="#overview" data-tab="overview" role="tab">개요</a><a class="tab" href="#dag" data-tab="dag" role="tab">작업 DAG <span class='cnt'>7</span></a><a class="tab" href="#rtm" data-tab="rtm" role="tab">요구사항 추적 <span class='cnt'>3</span></a><a class="tab" href="#tbd" data-tab="tbd" role="tab">TBD/TBC <span class='cnt'>2</span></a><a class="tab" href="#docs" data-tab="docs" role="tab">문서 <span class='cnt'>8</span></a><a class="tab" href="#git" data-tab="git" role="tab">Git 활동</a></nav>
+<noscript><p class="card">탭 전환·상세 보기에는 JavaScript가 필요합니다.</p></noscript>
+<main>
+<section class="panel" id="p-overview">
+<div class="kpis">
+<div class="kpi"><div class="kl">작업</div><div class="kv">2/7</div><div class="ks">머지됨 · 진행 1 · 검토 0</div></div>
+<div class="kpi"><div class="kl">착수 가능</div><div class="kv">1</div><div class="ks">선행작업이 모두 끝난 todo 포함</div></div>
+<div class="kpi"><div class="kl">RTM ① 통과</div><div class="kv">0/3</div><div class="ks">진행 1 · 불합격 0</div></div>
+<div class="kpi"><div class="kl">TBD/TBC 미확정</div><div class="kv">1/2</div><div class="ks">확정 여부 = 미확정</div></div>
+<div class="kpi"><div class="kl">문서</div><div class="kv">5</div><div class="ks">번호 문서 · 경고 0건</div></div>
+<div class="kpi"><div class="kl">최근 커밋</div><div class="kv">2026-11-06 13:00</div><div class="ks">d3b8242</div></div>
+</div>
+<div class="grid2">
+<div class="card"><h3>웨이브별 진행률</h3><div class="tw"><table class="compact"><thead><tr><th>웨이브</th><th class="num">작업</th><th style="min-width:140px">상태 분포</th><th class="num">머지</th><th class="num" title="todo">대기</th><th class="num" title="ready">착수 가능</th><th class="num" title="running">진행</th><th class="num" title="review">검토</th><th class="num" title="merged">머지됨</th></tr></thead><tbody>
+<tr><td>W0 계약·공통기반</td><td class="num">1</td><td><div class="bar"><span class="seg st-merged" style="width:100.00%" title="머지됨 1"></span></div></td><td class="num">100%</td><td class="num z1">0</td><td class="num z1">0</td><td class="num z1">0</td><td class="num z1">0</td><td class="num z0">1</td></tr>
+<tr><td>G-0 기반머지</td><td class="num">1</td><td><div class="bar"><span class="seg st-merged" style="width:100.00%" title="머지됨 1"></span></div></td><td class="num">100%</td><td class="num z1">0</td><td class="num z1">0</td><td class="num z1">0</td><td class="num z1">0</td><td class="num z0">1</td></tr>
+<tr><td>W1 요구사항</td><td class="num">2</td><td><div class="bar"><span class="seg st-ready" style="width:50.00%" title="착수 가능 1"></span><span class="seg st-running" style="width:50.00%" title="진행 1"></span></div></td><td class="num">0%</td><td class="num z1">0</td><td class="num z0">1</td><td class="num z0">1</td><td class="num z1">0</td><td class="num z1">0</td></tr>
+<tr><td>W2 모듈통합</td><td class="num">2</td><td><div class="bar"><span class="seg st-todo" style="width:100.00%" title="대기 2"></span></div></td><td class="num">0%</td><td class="num z0">2</td><td class="num z1">0</td><td class="num z1">0</td><td class="num z1">0</td><td class="num z1">0</td></tr>
+<tr><td>W3 체계통합</td><td class="num">1</td><td><div class="bar"><span class="seg st-todo" style="width:100.00%" title="대기 1"></span></div></td><td class="num">0%</td><td class="num z0">1</td><td class="num z1">0</td><td class="num z1">0</td><td class="num z1">0</td><td class="num z1">0</td></tr>
+<tr class="sum"><td>전체</td><td class="num">7</td><td><div class="bar"><span class="seg st-todo" style="width:42.86%" title="대기 3"></span><span class="seg st-ready" style="width:14.29%" title="착수 가능 1"></span><span class="seg st-running" style="width:14.29%" title="진행 1"></span><span class="seg st-merged" style="width:28.57%" title="머지됨 2"></span></div></td><td class="num">29%</td><td class="num">3</td><td class="num">1</td><td class="num">1</td><td class="num">0</td><td class="num">2</td></tr>
+</tbody></table></div><div class="legend"><span><i class="dot st-todo"></i>대기 <span class="muted mono">todo</span></span><span><i class="dot st-ready"></i>착수 가능 <span class="muted mono">ready</span></span><span><i class="dot st-running"></i>진행 <span class="muted mono">running</span></span><span><i class="dot st-review"></i>검토 <span class="muted mono">review</span></span><span><i class="dot st-merged"></i>머지됨 <span class="muted mono">merged</span></span></div></div>
+<div class="card"><h3>모듈별 작업 상태</h3><div class="tw"><table class="compact"><thead><tr><th>모듈</th><th class="num">작업</th><th class="num" title="todo">대기</th><th class="num" title="ready">착수 가능</th><th class="num" title="running">진행</th><th class="num" title="review">검토</th><th class="num" title="merged">머지됨</th><th style="min-width:110px">분포</th></tr></thead><tbody>
+<tr><td title="공통">공통</td><td class="num">2</td><td class="num z1">0</td><td class="num z1">0</td><td class="num z1">0</td><td class="num z1">0</td><td class="num z0">2</td><td><div class="bar"><span class="seg st-merged" style="width:100.00%" title="머지됨 2"></span></div></td></tr>
+<tr><td title="API 서버">API</td><td class="num">2</td><td class="num z0">1</td><td class="num z1">0</td><td class="num z0">1</td><td class="num z1">0</td><td class="num z1">0</td><td><div class="bar"><span class="seg st-todo" style="width:50.00%" title="대기 1"></span><span class="seg st-running" style="width:50.00%" title="진행 1"></span></div></td></tr>
+<tr><td title="웹 UI">WEB</td><td class="num">2</td><td class="num z0">1</td><td class="num z0">1</td><td class="num z1">0</td><td class="num z1">0</td><td class="num z1">0</td><td><div class="bar"><span class="seg st-todo" style="width:50.00%" title="대기 1"></span><span class="seg st-ready" style="width:50.00%" title="착수 가능 1"></span></div></td></tr>
+<tr><td title="체계">체계</td><td class="num">1</td><td class="num z0">1</td><td class="num z1">0</td><td class="num z1">0</td><td class="num z1">0</td><td class="num z1">0</td><td><div class="bar"><span class="seg st-todo" style="width:100.00%" title="대기 1"></span></div></td></tr>
+</tbody></table></div></div>
+</div>
+<div class="grid2">
+<div class="card"><h3>지금 할 수 있는 작업</h3>
+<ul class="tlist"><li><a class="mono tl" href="#task/R-WEB-001" title="할 일 목록·추가 화면 (모의 API로 먼저)">R-WEB-001</a> <span>할 일 목록·추가 화면 (모의 API로 먼저)</span> <span class="muted small">WEB · W1</span></li></ul>
+<h3>진행·검토 중</h3>
+<ul class="tlist"><li><a class="mono tl" href="#task/R-API-001" title="할 일 CRUD API">R-API-001</a> <span class="st st-running" title="running">진행</span> <span>할 일 CRUD API</span></li></ul>
+</div></div>
+<div class="card"><h3>주의 사항 <span class="muted">0</span></h3>
+<p class="muted">없음</p>
+</div></section>
+<section class="panel" id="p-dag" hidden>
+<div class="toolbar"><div class="seg-btns" data-view-group="dag"><button type="button" data-view="graph" aria-pressed="true">그래프</button><button type="button" data-view="table" aria-pressed="false">표</button></div><div class="legend"><span><i class="dot st-todo"></i>대기</span><span><i class="dot st-ready"></i>착수 가능</span><span><i class="dot st-running"></i>진행</span><span><i class="dot st-review"></i>검토</span><span><i class="dot st-merged"></i>머지됨</span><span><i class="bdgi">n</i>열린 선행</span><span><span class="mono small">p95</span> 지연 측정 필수</span><span>노드를 누르면 상세</span></div></div>
+<div class="dag-wrap" data-view-pane="graph"><svg class="dag" id="dag-svg" viewBox="0 0 972 300" width="972" height="300" role="img" aria-label="작업 의존 그래프" xmlns="http://www.w3.org/2000/svg"><defs><marker id="ah" viewBox="0 0 8 8" refX="7.5" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L8,4L0,8z" class="ahp"/></marker><marker id="ah2" viewBox="0 0 8 8" refX="7.5" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L8,4L0,8z" class="ahp2"/></marker></defs><rect class="lane0" x="0" y="40" width="972" height="60"/><text class="lanel" x="8" y="58">공통</text><rect class="lane1" x="0" y="104" width="972" height="60"/><text class="lanel" x="8" y="122">API</text><rect class="lane0" x="0" y="168" width="972" height="60"/><text class="lanel" x="8" y="186">WEB</text><rect class="lane1" x="0" y="232" width="972" height="60"/><text class="lanel" x="8" y="250">체계</text><rect class="wh" x="56" y="8" width="156" height="22" rx="3"/><text class="wht" x="134.0" y="23" text-anchor="middle">W0 계약·공통기반 · 1</text><rect class="wh" x="242" y="8" width="156" height="22" rx="3"/><text class="wht" x="320.0" y="23" text-anchor="middle">G-0 기반머지 · 1</text><rect class="wh" x="428" y="8" width="156" height="22" rx="3"/><text class="wht" x="506.0" y="23" text-anchor="middle">W1 요구사항 · 2</text><rect class="wh" x="614" y="8" width="156" height="22" rx="3"/><text class="wht" x="692.0" y="23" text-anchor="middle">W2 모듈통합 · 2</text><rect class="wh" x="800" y="8" width="156" height="22" rx="3"/><text class="wht" x="878.0" y="23" text-anchor="middle">W3 체계통합 · 1</text><path class="edge" data-from="F-01" data-to="G-0" d="M212,70.0 C230,70.0 223,70.0 241,70.0"/><path class="edge" data-from="G-0" data-to="R-API-001" d="M398,70.0 C416,70.0 409,134.0 427,134.0"/><path class="edge" data-from="G-0" data-to="R-WEB-001" d="M398,70.0 C416,70.0 409,198.0 427,198.0"/><path class="edge" data-from="R-API-001" data-to="I-API" d="M584,134.0 C602,134.0 595,134.0 613,134.0"/><path class="edge" data-from="R-WEB-001" data-to="I-WEB" d="M584,198.0 C602,198.0 595,198.0 613,198.0"/><path class="edge" data-from="I-API" data-to="S-01" d="M770,134.0 C788,134.0 781,262.0 799,262.0"/><path class="edge" data-from="I-WEB" data-to="S-01" d="M770,198.0 C788,198.0 781,262.0 799,262.0"/><g class="node st-merged" data-id="F-01" tabindex="0" role="button" transform="translate(56,50)"><title>F-01 API 계약(OpenAPI)·공통 규약·모듈 골격 — 머지됨, 열린 선행 0/0</title><rect class="nb" width="156" height="40" rx="4"/><rect class="ns" width="4" height="40" rx="1"/><text class="nid" x="10" y="15">F-01</text><text class="nt" x="10" y="31">API 계약(OpenAPI)·공통 규…</text></g><g class="node st-merged" data-id="G-0" tabindex="0" role="button" transform="translate(242,50)"><title>G-0 기반 머지 → int/api·int/web 생성 — 머지됨, 열린 선행 0/1</title><rect class="nb" width="156" height="40" rx="4"/><rect class="ns" width="4" height="40" rx="1"/><text class="nid" x="10" y="15">G-0</text><text class="nt" x="10" y="31">기반 머지 → int/api·int/we…</text></g><g class="node st-running" data-id="R-API-001" tabindex="0" role="button" transform="translate(428,114)"><title>R-API-001 할 일 CRUD API — 진행, 열린 선행 0/1</title><rect class="nb" width="156" height="40" rx="4"/><rect class="ns" width="4" height="40" rx="1"/><text class="nid" x="10" y="15">R-API-001</text><text class="nt" x="10" y="31">할 일 CRUD API</text><text class="perf" x="148" y="34" text-anchor="end">p95</text></g><g class="node st-ready" data-id="R-WEB-001" tabindex="0" role="button" transform="translate(428,178)"><title>R-WEB-001 할 일 목록·추가 화면 (모의 API로 먼저) — 착수 가능, 열린 선행 0/1</title><rect class="nb" width="156" height="40" rx="4"/><rect class="ns" width="4" height="40" rx="1"/><text class="nid" x="10" y="15">R-WEB-001</text><text class="nt" x="10" y="31">할 일 목록·추가 화면 (모의…</text></g><g class="node st-todo" data-id="I-API" tabindex="0" role="button" transform="translate(614,114)"><title>I-API API 서버 모듈 통합 — 대기, 열린 선행 1/1</title><rect class="nb" width="156" height="40" rx="4"/><rect class="ns" width="4" height="40" rx="1"/><text class="nid" x="10" y="15">I-API</text><text class="nt" x="10" y="31">API 서버 모듈 통합</text><rect class="bdg" x="131" y="5" width="20" height="14" rx="7"/><text class="bdgt" x="141" y="15.5" text-anchor="middle">1</text></g><g class="node st-todo" data-id="I-WEB" tabindex="0" role="button" transform="translate(614,178)"><title>I-WEB 웹 UI 모듈 통합 — 대기, 열린 선행 1/1</title><rect class="nb" width="156" height="40" rx="4"/><rect class="ns" width="4" height="40" rx="1"/><text class="nid" x="10" y="15">I-WEB</text><text class="nt" x="10" y="31">웹 UI 모듈 통합</text><rect class="bdg" x="131" y="5" width="20" height="14" rx="7"/><text class="bdgt" x="141" y="15.5" text-anchor="middle">1</text></g><g class="node st-todo" data-id="S-01" tabindex="0" role="button" transform="translate(800,242)"><title>S-01 체계 통합 (API + 웹 종단) — 대기, 열린 선행 2/2</title><rect class="nb" width="156" height="40" rx="4"/><rect class="ns" width="4" height="40" rx="1"/><text class="nid" x="10" y="15">S-01</text><text class="nt" x="10" y="31">체계 통합 (API + 웹 종단)</text><rect class="bdg" x="131" y="5" width="20" height="14" rx="7"/><text class="bdgt" x="141" y="15.5" text-anchor="middle">2</text></g></svg></div>
+<div data-view-pane="table" hidden><div class="filters" data-filter-for="dag-table"><span class="fl">모듈</span><button type="button" data-key="product" data-val="all" aria-pressed="true">전체</button><button type="button" data-key="product" data-val="common" aria-pressed="false">공통</button><button type="button" data-key="product" data-val="api" aria-pressed="false">API</button><button type="button" data-key="product" data-val="web" aria-pressed="false">WEB</button><button type="button" data-key="product" data-val="system" aria-pressed="false">체계</button><span class="fl">상태</span><button type="button" data-key="status" data-val="all" aria-pressed="true">전체</button><button type="button" data-key="status" data-val="todo" aria-pressed="false">대기</button><button type="button" data-key="status" data-val="ready" aria-pressed="false">착수 가능</button><button type="button" data-key="status" data-val="running" aria-pressed="false">진행</button><button type="button" data-key="status" data-val="review" aria-pressed="false">검토</button><button type="button" data-key="status" data-val="merged" aria-pressed="false">머지됨</button></div>
+<div class="tw"><table id="dag-table"><thead><tr><th>ID</th><th>제목</th><th>웨이브</th><th>모듈</th><th>상태</th><th class="num">열린 선행</th><th>선행작업</th><th>후행</th></tr></thead><tbody>
+<tr data-product="common" data-status="merged"><td class="nowrap"><a class="mono tl" href="#task/F-01" title="API 계약(OpenAPI)·공통 규약·모듈 골격">F-01</a></td><td>API 계약(OpenAPI)·공통 규약·모듈 골격</td><td class="nowrap">W0</td><td>공통</td><td><span class="st st-merged" title="merged">머지됨</span></td><td class="num">0/0</td><td class="deps"><span class="muted">-</span></td><td class="num">1</td></tr>
+<tr data-product="common" data-status="merged"><td class="nowrap"><a class="mono tl" href="#task/G-0" title="기반 머지 → int/api·int/web 생성">G-0</a></td><td>기반 머지 → int/api·int/web 생성</td><td class="nowrap">G-0</td><td>공통</td><td><span class="st st-merged" title="merged">머지됨</span></td><td class="num">0/1</td><td class="deps"><a class="mono tl" href="#task/F-01" title="API 계약(OpenAPI)·공통 규약·모듈 골격">F-01</a></td><td class="num">2</td></tr>
+<tr data-product="api" data-status="running"><td class="nowrap"><a class="mono tl" href="#task/R-API-001" title="할 일 CRUD API">R-API-001</a></td><td>할 일 CRUD API</td><td class="nowrap">W1</td><td>API</td><td><span class="st st-running" title="running">진행</span></td><td class="num">0/1</td><td class="deps"><a class="mono tl" href="#task/G-0" title="기반 머지 → int/api·int/web 생성">G-0</a></td><td class="num">1</td></tr>
+<tr data-product="web" data-status="ready"><td class="nowrap"><a class="mono tl" href="#task/R-WEB-001" title="할 일 목록·추가 화면 (모의 API로 먼저)">R-WEB-001</a></td><td>할 일 목록·추가 화면 (모의 API로 먼저)</td><td class="nowrap">W1</td><td>WEB</td><td><span class="st st-ready" title="ready">착수 가능</span></td><td class="num">0/1</td><td class="deps"><a class="mono tl" href="#task/G-0" title="기반 머지 → int/api·int/web 생성">G-0</a></td><td class="num">1</td></tr>
+<tr data-product="api" data-status="todo"><td class="nowrap"><a class="mono tl" href="#task/I-API" title="API 서버 모듈 통합">I-API</a></td><td>API 서버 모듈 통합</td><td class="nowrap">W2</td><td>API</td><td><span class="st st-todo" title="todo">대기</span></td><td class="num">1/1</td><td class="deps"><a class="mono tl" href="#task/R-API-001" title="할 일 CRUD API">R-API-001</a><sup class="open">●</sup></td><td class="num">1</td></tr>
+<tr data-product="web" data-status="todo"><td class="nowrap"><a class="mono tl" href="#task/I-WEB" title="웹 UI 모듈 통합">I-WEB</a></td><td>웹 UI 모듈 통합</td><td class="nowrap">W2</td><td>WEB</td><td><span class="st st-todo" title="todo">대기</span></td><td class="num">1/1</td><td class="deps"><a class="mono tl" href="#task/R-WEB-001" title="할 일 목록·추가 화면 (모의 API로 먼저)">R-WEB-001</a><sup class="open">●</sup></td><td class="num">1</td></tr>
+<tr data-product="system" data-status="todo"><td class="nowrap"><a class="mono tl" href="#task/S-01" title="체계 통합 (API + 웹 종단)">S-01</a></td><td>체계 통합 (API + 웹 종단)</td><td class="nowrap">W3</td><td>체계</td><td><span class="st st-todo" title="todo">대기</span></td><td class="num">2/2</td><td class="deps"><a class="mono tl" href="#task/I-API" title="API 서버 모듈 통합">I-API</a><sup class="open">●</sup> <a class="mono tl" href="#task/I-WEB" title="웹 UI 모듈 통합">I-WEB</a><sup class="open">●</sup></td><td class="num">0</td></tr>
+</tbody></table></div><p class="muted small"><sup class="open">●</sup> 아직 머지되지 않은 선행작업</p></div>
+</section>
+<template id="task-F-01"><div class="detail"><div class="dh"><span class="mono">F-01</span> <span class="st st-merged" title="merged">머지됨</span></div><h2>API 계약(OpenAPI)·공통 규약·모듈 골격</h2><dl class="kv"><dt>웨이브 · 모듈 · 계층</dt><dd>W0 계약·공통기반 · 공통 · L0</dd><dt>요구사항</dt><dd><span class="muted">-</span></dd><dt>브랜치</dt><dd><code>int/common</code> · base <code>main</code> 대비 ahead 0 / behind 1 · 머지됨</dd><dt>분기 기준</dt><dd><code>main</code></dd><dt>검증 단계 · 지연 측정</dt><dd>① · 해당 없음</dd><dt>write_scope</dt><dd><code class=blk>contracts/</code><code class=blk>docs/02_interface/</code><code class=blk>api/</code><code class=blk>web/</code><code class=blk>scripts/dev/</code></dd><dt>acceptance</dt><dd>할 일 자원(Todo: id·title·done·due·updated_at)의 CRUD 엔드포인트와 오류 형식(RFC 7807)을 OpenAPI 3.1로 정의하고 스키마 검사가 통과한다. api/·web/ 골격(빈 라우터·빈 화면·설정 파일)과 npm build/test 스크립트가 통과한다.</dd><dt>증적</dt><dd><a href="#doc/docs%2F06_evidence%2FF-01%2Freport.md">docs/06_evidence/F-01/report.md</a> <span class="muted small">작업 트리</span></dd></dl><h4>선행작업 <span class="muted">0개 열림 / 0</span></h4><ul class="tlist"><li class=muted>없음</li></ul><h4>후행작업 <span class="muted">1</span></h4><ul class="tlist"><li><a class="mono tl" href="#task/G-0" title="기반 머지 → int/api·int/web 생성">G-0</a> <span class="st st-merged" title="merged">머지됨</span> <span class="small">기반 머지 → int/api·int/web 생성</span></li></ul><h4>상태 판정 근거</h4><ol class="src"><li><span class="sk">tasks.yaml</span> <span class="st st-merged" title="merged">머지됨</span> status: merged</li><li><span class="sk">git</span> <span class="st st-merged" title="merged">머지됨</span> int/common가 main에 머지됨</li><li><span class="sk">git</span> <span class="st st-merged" title="merged">머지됨</span> [F-01] 커밋 1개가 모두 main에 포함됨</li><li><span class="sk">증적</span> <span class="st st-review" title="review">검토</span> docs/06_evidence/F-01/report.md (작업 트리)</li></ol><h4>관련 커밋 <span class="muted small">[F-01] 접두</span></h4><ul class="plain"><li class="mono small">46d1305 [F-01] API 계약(OpenAPI)·모듈 골격</li></ul></div></template>
+<template id="task-G-0"><div class="detail"><div class="dh"><span class="mono">G-0</span> <span class="st st-merged" title="merged">머지됨</span></div><h2>기반 머지 → int/api·int/web 생성</h2><dl class="kv"><dt>웨이브 · 모듈 · 계층</dt><dd>G-0 기반머지 · 공통 · L0</dd><dt>요구사항</dt><dd><span class="muted">-</span></dd><dt>브랜치</dt><dd><code>main</code> · base <code>main</code> 대비 ahead - / behind - · 기준 없음</dd><dt>분기 기준</dt><dd><code>main</code></dd><dt>검증 단계 · 지연 측정</dt><dd>① · 해당 없음</dd><dt>write_scope</dt><dd><span class=muted>없음</span></dd><dt>acceptance</dt><dd>int/common → main 머지, main에서 int/api·int/web 생성·푸시, 공통 스모크 통과</dd><dt>증적</dt><dd><span class="muted">없음 · 예정 경로 <code>docs/06_evidence/G-0/report.md</code></span></dd></dl><h4>선행작업 <span class="muted">0개 열림 / 1</span></h4><ul class="tlist"><li><a class="mono tl" href="#task/F-01" title="API 계약(OpenAPI)·공통 규약·모듈 골격">F-01</a> <span class="st st-merged" title="merged">머지됨</span> <span class="small">API 계약(OpenAPI)·공통 규약·모듈 골격</span></li></ul><h4>후행작업 <span class="muted">2</span></h4><ul class="tlist"><li><a class="mono tl" href="#task/R-API-001" title="할 일 CRUD API">R-API-001</a> <span class="st st-running" title="running">진행</span> <span class="small">할 일 CRUD API</span></li><li><a class="mono tl" href="#task/R-WEB-001" title="할 일 목록·추가 화면 (모의 API로 먼저)">R-WEB-001</a> <span class="st st-ready" title="ready">착수 가능</span> <span class="small">할 일 목록·추가 화면 (모의 API로 먼저)</span></li></ul><h4>상태 판정 근거</h4><ol class="src"><li><span class="sk">tasks.yaml</span> <span class="st st-merged" title="merged">머지됨</span> status: merged</li><li><span class="sk">git</span> <span class="st st-merged" title="merged">머지됨</span> 모듈 통합 브랜치 생성됨: int/api, int/web</li></ol><h4>관련 커밋 <span class="muted small">[G-0] 접두</span></h4><ul class="plain"><li class="muted">없음</li></ul></div></template>
+<template id="task-R-API-001"><div class="detail"><div class="dh"><span class="mono">R-API-001</span> <span class="st st-running" title="running">진행</span></div><h2>할 일 CRUD API</h2><dl class="kv"><dt>웨이브 · 모듈 · 계층</dt><dd>W1 요구사항 · API 서버 · L2</dd><dt>요구사항</dt><dd><a class="mono" href="#req/R-API-001">R-API-001</a> <a class="mono" href="#req/R-API-002">R-API-002</a></dd><dt>브랜치</dt><dd><code>req/R-API-001</code> · base <code>int/api</code> 대비 ahead 1 / behind 0 · 진행</dd><dt>분기 기준</dt><dd><code>int/api</code></dd><dt>검증 단계 · 지연 측정</dt><dd>① · p50/p95 측정 필수</dd><dt>write_scope</dt><dd><code class=blk>api/src/todos/</code><code class=blk>api/test/todos/</code></dd><dt>acceptance</dt><dd>OpenAPI 계약 시험(생성·조회·수정·삭제·목록 페이지) 전부 통과, 빈 제목·없는 id에 400/404 반환, 목록 100건 조회 p95 50ms 이하(로컬, 계기: HTTP 요청 수신 → 응답 전송).</dd><dt>증적</dt><dd><span class="muted">없음 · 예정 경로 <code>docs/06_evidence/R-API-001/report.md</code></span></dd></dl><h4>선행작업 <span class="muted">0개 열림 / 1</span></h4><ul class="tlist"><li><a class="mono tl" href="#task/G-0" title="기반 머지 → int/api·int/web 생성">G-0</a> <span class="st st-merged" title="merged">머지됨</span> <span class="small">기반 머지 → int/api·int/web 생성</span></li></ul><h4>후행작업 <span class="muted">1</span></h4><ul class="tlist"><li><a class="mono tl" href="#task/I-API" title="API 서버 모듈 통합">I-API</a> <span class="st st-todo" title="todo">대기</span> <span class="small">API 서버 모듈 통합</span></li></ul><h4>상태 판정 근거</h4><ol class="src"><li><span class="sk">tasks.yaml</span> <span class="st st-running" title="running">진행</span> status: running</li><li><span class="sk">git</span> <span class="st st-running" title="running">진행</span> req/R-API-001가 int/api보다 1커밋 앞섬</li><li><span class="sk">git</span> <span class="st st-running" title="running">진행</span> [R-API-001] 커밋 1개 있음</li></ol><h4>관련 커밋 <span class="muted small">[R-API-001] 접두</span></h4><ul class="plain"><li class="mono small">d3b8242 [R-API-001] 할 일 생성·조회 라우터 초안</li></ul></div></template>
+<template id="task-R-WEB-001"><div class="detail"><div class="dh"><span class="mono">R-WEB-001</span> <span class="st st-ready" title="ready">착수 가능</span></div><h2>할 일 목록·추가 화면 (모의 API로 먼저)</h2><dl class="kv"><dt>웨이브 · 모듈 · 계층</dt><dd>W1 요구사항 · 웹 UI · L2</dd><dt>요구사항</dt><dd><a class="mono" href="#req/R-WEB-001">R-WEB-001</a></dd><dt>브랜치</dt><dd><code>req/R-WEB-001</code> <span class="muted">(브랜치 없음)</span></dd><dt>분기 기준</dt><dd><code>int/web</code></dd><dt>검증 단계 · 지연 측정</dt><dd>① · 해당 없음</dd><dt>write_scope</dt><dd><code class=blk>web/src/pages/todos/</code><code class=blk>web/test/todos/</code></dd><dt>acceptance</dt><dd>목록 표시·추가·완료 토글 시나리오 3개 통과(계약 기반 모의 응답), API 오류 시 재시도 안내 표시, 키보드만으로 추가·토글 가능.</dd><dt>증적</dt><dd><span class="muted">없음 · 예정 경로 <code>docs/06_evidence/R-WEB-001/report.md</code></span></dd></dl><h4>선행작업 <span class="muted">0개 열림 / 1</span></h4><ul class="tlist"><li><a class="mono tl" href="#task/G-0" title="기반 머지 → int/api·int/web 생성">G-0</a> <span class="st st-merged" title="merged">머지됨</span> <span class="small">기반 머지 → int/api·int/web 생성</span></li></ul><h4>후행작업 <span class="muted">1</span></h4><ul class="tlist"><li><a class="mono tl" href="#task/I-WEB" title="웹 UI 모듈 통합">I-WEB</a> <span class="st st-todo" title="todo">대기</span> <span class="small">웹 UI 모듈 통합</span></li></ul><h4>상태 판정 근거</h4><ol class="src"><li><span class="sk">tasks.yaml</span> <span class="st st-todo" title="todo">대기</span> status: todo</li><li><span class="sk">파생</span> <span class="st st-ready" title="ready">착수 가능</span> 선행작업이 모두 머지됨</li></ol><h4>관련 커밋 <span class="muted small">[R-WEB-001] 접두</span></h4><ul class="plain"><li class="muted">없음</li></ul></div></template>
+<template id="task-I-API"><div class="detail"><div class="dh"><span class="mono">I-API</span> <span class="st st-todo" title="todo">대기</span></div><h2>API 서버 모듈 통합</h2><dl class="kv"><dt>웨이브 · 모듈 · 계층</dt><dd>W2 모듈통합 · API 서버 · L1</dd><dt>요구사항</dt><dd><span class="muted">-</span></dd><dt>브랜치</dt><dd><code>int/api</code> · base <code>main</code> 대비 ahead 0 / behind 0 · 변경 없음</dd><dt>분기 기준</dt><dd><code>main</code></dd><dt>검증 단계 · 지연 측정</dt><dd>① · 해당 없음</dd><dt>write_scope</dt><dd><code class=blk>api/bringup/</code><code class=blk>docs/06_evidence/I-API/</code></dd><dt>acceptance</dt><dd>req/R-API-* 전부 머지, 서버 기동·헬스 체크·계약 시험 통과</dd><dt>증적</dt><dd><span class="muted">없음 · 예정 경로 <code>docs/06_evidence/I-API/report.md</code></span></dd></dl><h4>선행작업 <span class="muted">1개 열림 / 1</span></h4><ul class="tlist"><li><a class="mono tl" href="#task/R-API-001" title="할 일 CRUD API">R-API-001</a> <span class="st st-running" title="running">진행</span> <span class="small">할 일 CRUD API</span></li></ul><h4>후행작업 <span class="muted">1</span></h4><ul class="tlist"><li><a class="mono tl" href="#task/S-01" title="체계 통합 (API + 웹 종단)">S-01</a> <span class="st st-todo" title="todo">대기</span> <span class="small">체계 통합 (API + 웹 종단)</span></li></ul><h4>상태 판정 근거</h4><ol class="src"><li><span class="sk">tasks.yaml</span> <span class="st st-todo" title="todo">대기</span> status: todo</li><li><span class="sk">git</span>  int/api 브랜치 있음 (base 대비 새 커밋 없음)</li></ol><h4>관련 커밋 <span class="muted small">[I-API] 접두</span></h4><ul class="plain"><li class="muted">없음</li></ul></div></template>
+<template id="task-I-WEB"><div class="detail"><div class="dh"><span class="mono">I-WEB</span> <span class="st st-todo" title="todo">대기</span></div><h2>웹 UI 모듈 통합</h2><dl class="kv"><dt>웨이브 · 모듈 · 계층</dt><dd>W2 모듈통합 · 웹 UI · L1</dd><dt>요구사항</dt><dd><span class="muted">-</span></dd><dt>브랜치</dt><dd><code>int/web</code> · base <code>main</code> 대비 ahead 0 / behind 0 · 변경 없음</dd><dt>분기 기준</dt><dd><code>main</code></dd><dt>검증 단계 · 지연 측정</dt><dd>① · 해당 없음</dd><dt>write_scope</dt><dd><code class=blk>web/bringup/</code><code class=blk>docs/06_evidence/I-WEB/</code></dd><dt>acceptance</dt><dd>req/R-WEB-* 전부 머지, 빌드 산출물 기동·화면 스모크 통과</dd><dt>증적</dt><dd><span class="muted">없음 · 예정 경로 <code>docs/06_evidence/I-WEB/report.md</code></span></dd></dl><h4>선행작업 <span class="muted">1개 열림 / 1</span></h4><ul class="tlist"><li><a class="mono tl" href="#task/R-WEB-001" title="할 일 목록·추가 화면 (모의 API로 먼저)">R-WEB-001</a> <span class="st st-ready" title="ready">착수 가능</span> <span class="small">할 일 목록·추가 화면 (모의 API로 먼저)</span></li></ul><h4>후행작업 <span class="muted">1</span></h4><ul class="tlist"><li><a class="mono tl" href="#task/S-01" title="체계 통합 (API + 웹 종단)">S-01</a> <span class="st st-todo" title="todo">대기</span> <span class="small">체계 통합 (API + 웹 종단)</span></li></ul><h4>상태 판정 근거</h4><ol class="src"><li><span class="sk">tasks.yaml</span> <span class="st st-todo" title="todo">대기</span> status: todo</li><li><span class="sk">git</span>  int/web 브랜치 있음 (base 대비 새 커밋 없음)</li></ol><h4>관련 커밋 <span class="muted small">[I-WEB] 접두</span></h4><ul class="plain"><li class="muted">없음</li></ul></div></template>
+<template id="task-S-01"><div class="detail"><div class="dh"><span class="mono">S-01</span> <span class="st st-todo" title="todo">대기</span></div><h2>체계 통합 (API + 웹 종단)</h2><dl class="kv"><dt>웨이브 · 모듈 · 계층</dt><dd>W3 체계통합 · 체계 · L0</dd><dt>요구사항</dt><dd><a class="mono" href="#req/R-WEB-001">R-WEB-001</a> <a class="mono" href="#req/R-API-001">R-API-001</a></dd><dt>브랜치</dt><dd><code>main</code> · base <code>main</code> 대비 ahead - / behind - · 기준 없음</dd><dt>분기 기준</dt><dd><code>main</code></dd><dt>검증 단계 · 지연 측정</dt><dd>① · 해당 없음</dd><dt>write_scope</dt><dd><code class=blk>system/</code><code class=blk>docs/06_evidence/S-01/</code></dd><dt>acceptance</dt><dd>int/* → main 머지, 실제 API로 목록·추가·완료 종단 시나리오 통과(모의 응답 제거)</dd><dt>증적</dt><dd><span class="muted">없음 · 예정 경로 <code>docs/06_evidence/S-01/report.md</code></span></dd></dl><h4>선행작업 <span class="muted">2개 열림 / 2</span></h4><ul class="tlist"><li><a class="mono tl" href="#task/I-API" title="API 서버 모듈 통합">I-API</a> <span class="st st-todo" title="todo">대기</span> <span class="small">API 서버 모듈 통합</span></li><li><a class="mono tl" href="#task/I-WEB" title="웹 UI 모듈 통합">I-WEB</a> <span class="st st-todo" title="todo">대기</span> <span class="small">웹 UI 모듈 통합</span></li></ul><h4>후행작업 <span class="muted">0</span></h4><ul class="tlist"><li class=muted>없음</li></ul><h4>상태 판정 근거</h4><ol class="src"><li><span class="sk">tasks.yaml</span> <span class="st st-todo" title="todo">대기</span> status: todo</li></ol><h4>관련 커밋 <span class="muted small">[S-01] 접두</span></h4><ul class="plain"><li class="muted">없음</li></ul></div></template>
+<section class="panel" id="p-rtm" hidden>
+<div class="card"><h3>검증 단계별 충족률 <span class="muted small">요구사항 3행</span></h3>
+<div class="tw"><table class="compact"><thead><tr><th>단계</th><th style="min-width:160px">분포</th><th class="num">통과율</th><th class="num">통과 ●</th><th class="num">진행 ◐</th><th class="num">불합격 ✕</th><th class="num">미착수 -</th></tr></thead><tbody>
+<tr><td class="nowrap">① 로컬</td><td><div class="bar"><span class="seg vm-◐" style="width:33.33%" title="진행 1"></span><span class="seg vm--" style="width:66.67%" title="미착수 2"></span></div></td><td class="num">0%</td><td class="num z1">0</td><td class="num z0">1</td><td class="num z1">0</td><td class="num z0">2</td></tr>
+<tr><td class="nowrap">② 통합 환경</td><td><div class="bar"><span class="seg vm--" style="width:100.00%" title="미착수 3"></span></div></td><td class="num">0%</td><td class="num z1">0</td><td class="num z1">0</td><td class="num z1">0</td><td class="num z0">3</td></tr>
+<tr><td class="nowrap">③ 대상 환경</td><td><div class="bar"><span class="seg vm--" style="width:100.00%" title="미착수 3"></span></div></td><td class="num">0%</td><td class="num z1">0</td><td class="num z1">0</td><td class="num z1">0</td><td class="num z0">3</td></tr>
+<tr><td class="nowrap">④ 운영</td><td><div class="bar"><span class="seg vm--" style="width:100.00%" title="미착수 3"></span></div></td><td class="num">0%</td><td class="num z1">0</td><td class="num z1">0</td><td class="num z1">0</td><td class="num z0">3</td></tr>
+</tbody></table></div>
+<div class="tw"><table class="compact"><thead><tr><th>모듈</th><th class="num">행</th><th>①</th><th>②</th><th>③</th><th>④</th></tr></thead><tbody>
+<tr><td>API</td><td class="num">2</td><td style="min-width:70px"><div class="bar"><span class="seg vm-◐" style="width:50.00%" title="진행 1"></span><span class="seg vm--" style="width:50.00%" title="미착수 1"></span></div><span class="small muted">0/2</span></td><td style="min-width:70px"><div class="bar"><span class="seg vm--" style="width:100.00%" title="미착수 2"></span></div><span class="small muted">0/2</span></td><td style="min-width:70px"><div class="bar"><span class="seg vm--" style="width:100.00%" title="미착수 2"></span></div><span class="small muted">0/2</span></td><td style="min-width:70px"><div class="bar"><span class="seg vm--" style="width:100.00%" title="미착수 2"></span></div><span class="small muted">0/2</span></td></tr>
+<tr><td>WEB</td><td class="num">1</td><td style="min-width:70px"><div class="bar"><span class="seg vm--" style="width:100.00%" title="미착수 1"></span></div><span class="small muted">0/1</span></td><td style="min-width:70px"><div class="bar"><span class="seg vm--" style="width:100.00%" title="미착수 1"></span></div><span class="small muted">0/1</span></td><td style="min-width:70px"><div class="bar"><span class="seg vm--" style="width:100.00%" title="미착수 1"></span></div><span class="small muted">0/1</span></td><td style="min-width:70px"><div class="bar"><span class="seg vm--" style="width:100.00%" title="미착수 1"></span></div><span class="small muted">0/1</span></td></tr>
+</tbody></table></div><div class="legend"><span><i class="dot vm-●"></i>● 통과</span><span><i class="dot vm-◐"></i>◐ 진행</span><span><i class="dot vm-✕"></i>✕ 불합격</span><span><i class="dot vm--"></i>- 미착수</span></div></div>
+<div class="filters" data-filter-for="rtm-tables"><span class="fl">모듈</span><button type="button" data-key="product" data-val="all" aria-pressed="true">전체</button><button type="button" data-key="product" data-val="api" aria-pressed="false">API</button><button type="button" data-key="product" data-val="web" aria-pressed="false">WEB</button></div>
+<div id="rtm-tables">
+<div class="card rtm-sec" data-product="api"><h3>1. API 서버 (API)</h3><div class="tw"><table class="rtm"><thead><tr><th>식별자</th><th>요약</th><th class="wide">예비 설계 할당</th><th>관련 TBD</th><th class="vs">①</th><th class="vs">②</th><th class="vs">③</th><th class="vs">④</th><th>작업</th><th>증적</th></tr></thead><tbody>
+<tr id="req-R-API-001"><td class="nowrap mono">R-API-001</td><td>할 일 생성·조회·수정·삭제</td><td class="wide small">api/src/todos</td><td class="nowrap"></td><td class="vs vm-◐" title="① 로컬: 진행">◐</td><td class="vs vm--" title="② 통합 환경: 미착수">-</td><td class="vs vm--" title="③ 대상 환경: 미착수">-</td><td class="vs vm--" title="④ 운영: 미착수">-</td><td class="deps"><a class="mono tl" href="#task/R-API-001" title="할 일 CRUD API">R-API-001</a><i class="dot st-running" title="진행"></i> <a class="mono tl" href="#task/S-01" title="체계 통합 (API + 웹 종단)">S-01</a><i class="dot st-todo" title="대기"></i></td><td><span class="muted">-</span></td></tr>
+<tr id="req-R-API-002"><td class="nowrap mono">R-API-002</td><td>목록 페이지 조회와 응답 시간 목표</td><td class="wide small">api/src/todos (페이지)</td><td class="nowrap"><a class="mono" href="#tbdrow/TBD-01">TBD-01</a></td><td class="vs vm--" title="① 로컬: 미착수">-</td><td class="vs vm--" title="② 통합 환경: 미착수">-</td><td class="vs vm--" title="③ 대상 환경: 미착수">-</td><td class="vs vm--" title="④ 운영: 미착수">-</td><td class="deps"><a class="mono tl" href="#task/R-API-001" title="할 일 CRUD API">R-API-001</a><i class="dot st-running" title="진행"></i></td><td><span class="muted">-</span></td></tr>
+</tbody></table></div></div>
+<div class="card rtm-sec" data-product="web"><h3>2. 웹 UI (WEB)</h3><div class="tw"><table class="rtm"><thead><tr><th>식별자</th><th>요약</th><th class="wide">예비 설계 할당</th><th>관련 TBD</th><th class="vs">①</th><th class="vs">②</th><th class="vs">③</th><th class="vs">④</th><th>작업</th><th>증적</th></tr></thead><tbody>
+<tr id="req-R-WEB-001"><td class="nowrap mono">R-WEB-001</td><td>목록 표시·추가·완료 토글, 키보드 조작</td><td class="wide small">web/src/pages/todos</td><td class="nowrap"><a class="mono" href="#tbdrow/TBD-02">TBD-02</a></td><td class="vs vm--" title="① 로컬: 미착수">-</td><td class="vs vm--" title="② 통합 환경: 미착수">-</td><td class="vs vm--" title="③ 대상 환경: 미착수">-</td><td class="vs vm--" title="④ 운영: 미착수">-</td><td class="deps"><a class="mono tl" href="#task/R-WEB-001" title="할 일 목록·추가 화면 (모의 API로 먼저)">R-WEB-001</a><i class="dot st-ready" title="착수 가능"></i> <a class="mono tl" href="#task/S-01" title="체계 통합 (API + 웹 종단)">S-01</a><i class="dot st-todo" title="대기"></i></td><td><span class="muted">-</span></td></tr>
+</tbody></table></div></div>
+</div>
+<p class="muted small">원본: <a href="#doc/docs%2F01_requirements%2F01_%EC%9A%94%EA%B5%AC%EC%82%AC%ED%95%AD%EC%B6%94%EC%A0%81%ED%91%9C_20261106.md">docs/01_requirements/01_요구사항추적표_20261106.md</a></p>
+</section>
+<section class="panel" id="p-tbd" hidden>
+<div class="filters" data-filter-for="tbd-table"><span class="fl">확정 여부</span><button type="button" data-key="state" data-val="all" aria-pressed="true">전체 2</button><button type="button" data-key="state" data-val="내부 확정" aria-pressed="false">내부 확정 1</button><button type="button" data-key="state" data-val="미확정" aria-pressed="false">미확정 1</button><span class="fl">구분</span><button type="button" data-key="kind" data-val="all" aria-pressed="true">전체</button><button type="button" data-key="kind" data-val="TBC" aria-pressed="false">TBC 1</button><button type="button" data-key="kind" data-val="TBD" aria-pressed="false">TBD 1</button></div>
+<div class="tw"><table id="tbd-table"><thead><tr><th>순번</th><th>요구사양 식별자</th><th>구분</th><th>제목</th><th>사유 및 계획</th><th>확정 예정</th><th>확정 여부</th><th>RTM 참조 행</th></tr></thead><tbody>
+<tr id="tbd-TBD-01" data-state="내부 확정" data-kind="TBD"><td class="nowrap mono">TBD-01</td><td>R-API-002<div class="small"><a class="mono" href="#req/R-API-002">R-API-002</a></div></td><td>TBD</td><td>목록 응답 시간 목표</td><td class="small">요구 메모에 "빠르게"만 있음. 내부안 p95 50ms(100건)</td><td class="nowrap">W1 중</td><td class="nowrap ">내부 확정</td><td class="deps"><a class="mono small" href="#req/R-API-002">R-API-002</a></td></tr>
+<tr id="tbd-TBD-02" data-state="미확정" data-kind="TBC"><td class="nowrap mono">TBD-02</td><td>R-WEB-001<div class="small"><a class="mono" href="#req/R-WEB-001">R-WEB-001</a></div></td><td>TBC</td><td>지원 브라우저 범위</td><td class="small">최신 2개 판 가정. 사용자 확인 필요</td><td class="nowrap">W2 전</td><td class="nowrap warn">미확정</td><td class="deps"><a class="mono small" href="#req/R-WEB-001">R-WEB-001</a></td></tr>
+</tbody></table></div>
+<p class="muted small">원본: <a href="#doc/docs%2F01_requirements%2F02_TBD%EA%B4%80%EB%A6%AC%EB%8C%80%EC%9E%A5_20261106.md">docs/01_requirements/02_TBD관리대장_20261106.md</a> · "내부 확정"은 고객·이해관계자 확인 전 상태</p>
+</section>
+<section class="panel" id="p-docs" hidden><div class="docs-grid"><div>
+<div class="card"><h3 class="mono">docs (최상위)/ <span class="muted">1</span></h3>
+<div class="tw"><table class="compact doc-table"><thead><tr><th class="num">순번</th><th>문서명</th><th>날짜</th><th>최신 판</th><th>git 최종 수정</th></tr></thead><tbody>
+<tr data-doc-row="docs/README.md"><td class="num mono"></td><td><a href="#doc/docs%2FREADME.md">README.md</a></td><td class="nowrap"></td><td class="nowrap">v1.0 <span class="muted small">2026-11-06</span></td><td class="nowrap small">2026-11-06 10:00</td></tr>
+</tbody></table></div></div>
+<div class="card"><h3 class="mono">01_requirements/ <span class="muted">2</span></h3>
+<div class="tw"><table class="compact doc-table"><thead><tr><th class="num">순번</th><th>문서명</th><th>날짜</th><th>최신 판</th><th>git 최종 수정</th></tr></thead><tbody>
+<tr data-doc-row="docs/01_requirements/01_요구사항추적표_20261106.md"><td class="num mono">01</td><td><a href="#doc/docs%2F01_requirements%2F01_%EC%9A%94%EA%B5%AC%EC%82%AC%ED%95%AD%EC%B6%94%EC%A0%81%ED%91%9C_20261106.md">요구사항추적표</a></td><td class="nowrap">2026-11-06</td><td class="nowrap">v1.0 <span class="muted small">2026-11-06</span></td><td class="nowrap small">2026-11-06 10:00</td></tr>
+<tr data-doc-row="docs/01_requirements/02_TBD관리대장_20261106.md"><td class="num mono">02</td><td><a href="#doc/docs%2F01_requirements%2F02_TBD%EA%B4%80%EB%A6%AC%EB%8C%80%EC%9E%A5_20261106.md">TBD관리대장</a></td><td class="nowrap">2026-11-06</td><td class="nowrap">v1.0 <span class="muted small">2026-11-06</span></td><td class="nowrap small">2026-11-06 10:00</td></tr>
+</tbody></table></div></div>
+<div class="card"><h3 class="mono">02_interface/ <span class="muted">0</span></h3>
+<p class="muted small">비어 있음</p></div>
+<div class="card"><h3 class="mono">03_design/ <span class="muted">0</span></h3>
+<p class="muted small">비어 있음</p></div>
+<div class="card"><h3 class="mono">04_test/ <span class="muted">0</span></h3>
+<p class="muted small">비어 있음</p></div>
+<div class="card"><h3 class="mono">05_reports/ <span class="muted">0</span></h3>
+<p class="muted small">비어 있음</p></div>
+<div class="card"><h3 class="mono">06_evidence/ <span class="muted">2</span></h3>
+<div class="tw"><table class="compact doc-table"><thead><tr><th>작업 ID</th><th>파일</th><th>최신 판</th><th>git 최종 수정</th></tr></thead><tbody>
+<tr data-doc-row="docs/06_evidence/F-01/report.md"><td><a class="mono tl" href="#task/F-01" title="API 계약(OpenAPI)·공통 규약·모듈 골격">F-01</a></td><td><a href="#doc/docs%2F06_evidence%2FF-01%2Freport.md">report.md</a></td><td>v1.0 <span class="muted small">2026-11-06</span></td><td class="nowrap small">2026-11-06 11:00 </td></tr>
+<tr data-doc-row="docs/06_evidence/README.md"><td>-</td><td><a href="#doc/docs%2F06_evidence%2FREADME.md">README.md</a></td><td><span class="muted">-</span></td><td class="nowrap small">2026-11-06 10:00 </td></tr>
+</tbody></table></div></div>
+<div class="card"><h3 class="mono">07_process/ <span class="muted">3</span></h3>
+<div class="tw"><table class="compact doc-table"><thead><tr><th class="num">순번</th><th>문서명</th><th>날짜</th><th>최신 판</th><th>git 최종 수정</th></tr></thead><tbody>
+<tr data-doc-row="docs/07_process/01_개발프로세스-지표_20261106.md"><td class="num mono">01</td><td><a href="#doc/docs%2F07_process%2F01_%EA%B0%9C%EB%B0%9C%ED%94%84%EB%A1%9C%EC%84%B8%EC%8A%A4-%EC%A7%80%ED%91%9C_20261106.md">개발프로세스-지표</a></td><td class="nowrap">2026-11-06</td><td class="nowrap">v1.0 <span class="muted small">2026-11-06</span></td><td class="nowrap small">2026-11-06 10:00</td></tr>
+<tr data-doc-row="docs/07_process/02_의사결정기록_20261106.md"><td class="num mono">02</td><td><a href="#doc/docs%2F07_process%2F02_%EC%9D%98%EC%82%AC%EA%B2%B0%EC%A0%95%EA%B8%B0%EB%A1%9D_20261106.md">의사결정기록</a></td><td class="nowrap">2026-11-06</td><td class="nowrap">v1.0 <span class="muted small">2026-11-06</span></td><td class="nowrap small">2026-11-06 10:00</td></tr>
+<tr data-doc-row="docs/07_process/03_운영이슈-교훈_20261106.md"><td class="num mono">03</td><td><a href="#doc/docs%2F07_process%2F03_%EC%9A%B4%EC%98%81%EC%9D%B4%EC%8A%88-%EA%B5%90%ED%9B%88_20261106.md">운영이슈-교훈</a></td><td class="nowrap">2026-11-06</td><td class="nowrap">v1.0 <span class="muted small">2026-11-06</span></td><td class="nowrap small">2026-11-06 10:00</td></tr>
+</tbody></table></div></div>
+</div><div class="doc-view card" id="doc-view"><p class="muted">문서를 선택하면 본문이 여기 표시됩니다.</p></div></div>
+<template data-doc="docs/01_requirements/01_요구사항추적표_20261106.md"><div class="doc-head"><span class="mono small">docs/01_requirements/01_요구사항추적표_20261106.md</span></div><div class="md"><h1>요구사항 추적표 (RTM)</h1>
+<div class="tw"><table><thead><tr><th>항목</th><th>내용</th></tr></thead><tbody><tr><td>대상</td><td>할 일 관리 웹앱 (가상 예제)</td></tr><tr><td>근거</td><td>요구 메모 v1 (요약)</td></tr><tr><td>갱신</td><td>매니저가 머지할 때 검증 단계 칸을 갱신한다</td></tr></tbody></table></div>
+<h2>개정이력</h2>
+<div class="tw"><table><thead><tr><th>판</th><th>일자</th><th>내용</th><th>작성</th></tr></thead><tbody><tr><td>v1.0</td><td>2026-11-06</td><td>최초 작성</td><td>매니저</td></tr></tbody></table></div>
+<p>표기: ● 통과 · ◐ 진행·부분(보완·모의 대체 남음) · ✕ 불합격 · - 미착수.</p>
+<h2>1. API 서버 (API)</h2>
+<div class="tw"><table><thead><tr><th>식별자</th><th>요약</th><th>검증</th><th>예비 설계 할당</th><th>관련 TBD</th><th>①</th><th>②</th><th>③</th><th>④</th></tr></thead><tbody><tr><td>R-API-001</td><td>할 일 생성·조회·수정·삭제</td><td>시험</td><td>api/src/todos</td><td></td><td>◐</td><td>-</td><td>-</td><td>-</td></tr><tr><td>R-API-002</td><td>목록 페이지 조회와 응답 시간 목표</td><td>시험</td><td>api/src/todos (페이지)</td><td>TBD-01</td><td>-</td><td>-</td><td>-</td><td>-</td></tr></tbody></table></div>
+<h2>2. 웹 UI (WEB)</h2>
+<div class="tw"><table><thead><tr><th>식별자</th><th>요약</th><th>검증</th><th>예비 설계 할당</th><th>관련 TBD</th><th>①</th><th>②</th><th>③</th><th>④</th></tr></thead><tbody><tr><td>R-WEB-001</td><td>목록 표시·추가·완료 토글, 키보드 조작</td><td>시연</td><td>web/src/pages/todos</td><td>TBD-02</td><td>-</td><td>-</td><td>-</td><td>-</td></tr></tbody></table></div></div></template>
+<template data-doc="docs/01_requirements/02_TBD관리대장_20261106.md"><div class="doc-head"><span class="mono small">docs/01_requirements/02_TBD관리대장_20261106.md</span></div><div class="md"><h1>TBD/TBC 관리대장</h1>
+<h2>개정이력</h2>
+<div class="tw"><table><thead><tr><th>판</th><th>일자</th><th>내용</th><th>작성</th></tr></thead><tbody><tr><td>v1.0</td><td>2026-11-06</td><td>최초 작성</td><td>매니저</td></tr></tbody></table></div>
+<h2>목록</h2>
+<div class="tw"><table><thead><tr><th>순번</th><th>요구사양 식별자</th><th>구분</th><th>제목</th><th>사유 및 계획</th><th>확정 예정</th><th>확정 여부</th></tr></thead><tbody><tr><td>TBD-01</td><td>R-API-002</td><td>TBD</td><td>목록 응답 시간 목표</td><td>요구 메모에 "빠르게"만 있음. 내부안 p95 50ms(100건)</td><td>W1 중</td><td>내부 확정</td></tr><tr><td>TBD-02</td><td>R-WEB-001</td><td>TBC</td><td>지원 브라우저 범위</td><td>최신 2개 판 가정. 사용자 확인 필요</td><td>W2 전</td><td>미확정</td></tr></tbody></table></div></div></template>
+<template data-doc="docs/06_evidence/F-01/report.md"><div class="doc-head"><span class="mono small">docs/06_evidence/F-01/report.md</span></div><div class="md"><h1>증적 보고서: F-01 API 계약(OpenAPI)·공통 규약·모듈 골격</h1>
+<div class="tw"><table><thead><tr><th>항목</th><th>내용</th></tr></thead><tbody><tr><td>요구사항</td><td>(계약 — R-API-001·R-WEB-001 공통 전제)</td></tr><tr><td>브랜치 / 커밋</td><td>int/common</td></tr><tr><td>검증 단계</td><td>①</td></tr><tr><td>결과</td><td>통과</td></tr><tr><td>작성</td><td>F-01 작업 세션, 2026-11-06</td></tr></tbody></table></div>
+<h2>개정이력</h2>
+<div class="tw"><table><thead><tr><th>판</th><th>일자</th><th>내용</th><th>작성</th></tr></thead><tbody><tr><td>v1.0</td><td>2026-11-06</td><td>최초 작성</td><td>F-01</td></tr></tbody></table></div>
+<h2>2. 시험</h2>
+<div class="tw"><table><thead><tr><th>시험 ID</th><th>내용</th><th>기준</th><th>측정</th><th>판정</th></tr></thead><tbody><tr><td>T-F-01-01</td><td>OpenAPI 스키마 검사</td><td>오류 0</td><td>오류 0</td><td>통과</td></tr><tr><td>T-F-01-02</td><td>골격 빌드·시험</td><td>통과</td><td>통과 (시험 4건)</td><td>통과</td></tr></tbody></table></div>
+<h2>4. 의존성·라이선스</h2>
+<div class="tw"><table><thead><tr><th>의존성</th><th>버전</th><th>라이선스</th><th>용도</th></tr></thead><tbody><tr><td>(예시) 스키마 검사 도구</td><td>-</td><td>MIT</td><td>계약 검사</td></tr></tbody></table></div></div></template>
+<template data-doc="docs/06_evidence/README.md"><div class="doc-head"><span class="mono small">docs/06_evidence/README.md</span></div><div class="md"><h1>작업별 시험 증적</h1>
+<p>작업마다 <code>&lt;작업ID&gt;/report.md</code>를 둔다. 양식은 <code>orchestration/templates/evidence.md</code>다.
+작업 세션이 자기 폴더만 쓰므로 경로가 겹치지 않는다. 원본 로그·대용량 결과는 커밋하지 않고 경로만 적는다.</p></div></template>
+<template data-doc="docs/07_process/01_개발프로세스-지표_20261106.md"><div class="doc-head"><span class="mono small">docs/07_process/01_개발프로세스-지표_20261106.md</span></div><div class="md"><h1>개발 프로세스·지표 기록</h1>
+<div class="tw"><table><thead><tr><th>항목</th><th>내용</th></tr></thead><tbody><tr><td>문서</td><td>할 일 관리 웹앱 AI 다중 세션 개발 과정 기록</td></tr><tr><td>성격</td><td>결과물만이 아니라 <strong>어떻게 만들었는가</strong>를 남긴다</td></tr><tr><td>갱신</td><td>매니저가 이정표마다 갱신한다. 결정은 02, 문제와 교훈은 03에 따로 쌓는다</td></tr></tbody></table></div>
+<blockquote><p>외부 공개 주의: 이 기록을 밖에 쓸 때는 요구 문구, 고객 정보, 가격을 빼고 <strong>방법론·구조·지표만</strong> 쓴다. 공개용으로 걸러 낸 판을 따로 만든다.</p></blockquote>
+<h2>개정이력</h2>
+<div class="tw"><table><thead><tr><th>판</th><th>일자</th><th>내용</th><th>작성</th></tr></thead><tbody><tr><td>v1.0</td><td>2026-11-06</td><td>최초 작성</td><td>매니저</td></tr></tbody></table></div>
+<h2>1. 한 줄 요약</h2>
+<p>(무엇을, 몇 명과 몇 개의 세션으로, 어떤 체계로 만들었는가)</p>
+<h2>2. 출발점과 제약</h2>
+<div class="tw"><table><thead><tr><th>구분</th><th>내용</th></tr></thead><tbody><tr><td>입력</td><td></td></tr><tr><td>대상 환경</td><td></td></tr><tr><td>검증 방식</td><td></td></tr><tr><td>관리 체계</td><td></td></tr><tr><td>보안·배포 제한</td><td></td></tr></tbody></table></div>
+<h2>3. 세션 계층</h2>
+<p>마스터 → 작업관리 매니저 → L1 모듈 통합 / L2 요구사항 세션. 구조는 <code>orchestration/README.md</code>.</p>
+<h2>4. 브랜치·머지 계층</h2>
+<p><code>main</code> ← <code>int/&lt;모듈&gt;</code> ← <code>req/&lt;ID&gt;</code>, <code>--no-ff</code>, <code>[작업ID]</code> 접두, rebase 금지.</p>
+<h2>5. 작업 DAG와 웨이브</h2>
+<p>(웨이브별 작업 수, 진행 중 추가한 작업과 이유)</p>
+<h2>6. 개발·검증 인프라</h2>
+<div class="tw"><table><thead><tr><th>요소</th><th>구성</th><th>목적</th></tr></thead><tbody></tbody></table></div>
+<h2>7. 사람-에이전트 상호작용 패턴</h2>
+<div class="tw"><table><thead><tr><th>패턴</th><th>예</th></tr></thead><tbody></tbody></table></div>
+<h2>8. 지표 (이정표마다 행 추가)</h2>
+<div class="tw"><table><thead><tr><th>시점</th><th>완료 작업</th><th>시험 수</th><th>동시 세션</th><th>머신별 사용률</th><th>실패·재작업</th><th>비고</th></tr></thead><tbody><tr><td>착수 (2026-11-06)</td><td>0</td><td>0</td><td>0</td><td></td><td></td><td></td></tr></tbody></table></div>
+<h2>9. 회고 메모 (계속 추가)</h2>
+<p>-</p></div></template>
+<template data-doc="docs/07_process/02_의사결정기록_20261106.md"><div class="doc-head"><span class="mono small">docs/07_process/02_의사결정기록_20261106.md</span></div><div class="md"><h1>의사결정 기록 (Decision Log)</h1>
+<p>결정 하나에 한 행이다. <strong>결정자</strong>는 사용자 / 마스터 / 매니저로 구분한다. 결정이 뒤집히면 행을 지우지 않고 새 행을 추가하며, 이전 행의 상태를 "대체됨(D-nn)"으로 바꾼다.</p>
+<h2>개정이력</h2>
+<div class="tw"><table><thead><tr><th>판</th><th>일자</th><th>내용</th><th>작성</th></tr></thead><tbody><tr><td>v1.0</td><td>2026-11-06</td><td>최초 작성</td><td>매니저</td></tr></tbody></table></div>
+<h2>결정 목록</h2>
+<div class="tw"><table><thead><tr><th>ID</th><th>일자</th><th>영역</th><th>결정</th><th>검토한 대안</th><th>결정자</th><th>근거</th><th>영향</th><th>상태</th></tr></thead><tbody><tr><td>D-01</td><td>2026-11-06</td><td>관리</td><td>3계층 세션(마스터·매니저·작업 세션)과 요구사항 1개 = 세션 1개로 개발</td><td>단일 세션</td><td>사용자</td><td>컨텍스트 관리, 소통과 운영 분리</td><td>orchestration/</td><td>유효</td></tr></tbody></table></div>
+<p>영역 예: 요구 · 인터페이스 · 설계 · 검증 · 인프라 · 운영 · 관리 · 문서 · 라이선스 · 비용</p></div></template>
+<template data-doc="docs/07_process/03_운영이슈-교훈_20261106.md"><div class="doc-head"><span class="mono small">docs/07_process/03_운영이슈-교훈_20261106.md</span></div><div class="md"><h1>운영 이슈·교훈 기록</h1>
+<p>다중 에이전트 개발을 운영하면서 생긴 문제를 기록한다. 이슈마다 <strong>현상 → 원인 → 조치 → 교훈</strong> 순으로 적는다. 매니저는 새 이슈를 발견하면(워커가 보고한 인프라 결함 포함) 여기에 추가한다.</p>
+<h2>개정이력</h2>
+<div class="tw"><table><thead><tr><th>판</th><th>일자</th><th>내용</th><th>작성</th></tr></thead><tbody><tr><td>v1.0</td><td>2026-11-06</td><td>최초 작성</td><td>매니저</td></tr></tbody></table></div>
+<h2>요약</h2>
+<div class="tw"><table><thead><tr><th>ID</th><th>분류</th><th>제목</th><th>영향</th></tr></thead><tbody><tr><td>I-01</td><td>(예) 오케스트레이션</td><td>(예) 워커가 확인 프롬프트에서 멈춤</td><td>(예) 워커 정지 15분</td></tr></tbody></table></div>
+<p>분류 예: 오케스트레이션 · 빌드 · 스크립트 · 시험 · 환경 · 자원 · 인터페이스 · 통합 · 측정 · 안전 · 규칙</p>
+<h2>상세</h2>
+<h3>I-01 (제목)</h3>
+<ul><li><strong>현상:</strong></li><li><strong>원인:</strong></li><li><strong>조치:</strong></li><li><strong>교훈:</strong></li></ul></div></template>
+<template data-doc="docs/README.md"><div class="doc-head"><span class="mono small">docs/README.md</span></div><div class="md"><h1>문서 관리 체계 — 할 일 관리 웹앱</h1>
+<blockquote><p>배포 제한 자료(원본 요구 문서, 계약서, 고객 자료)는 저장소에 넣지 않는다. 저장소에는 요약만 싣고, 원본은 git 제외 경로(예: <code>.orca/drops/</code>)에 둔다.</p></blockquote>
+<h2>1. 문서 관리 규칙</h2>
+<h3>1.1 폴더 번호</h3>
+<div class="tw"><table><thead><tr><th>폴더</th><th>내용</th></tr></thead><tbody><tr><td><code>01_requirements/</code></td><td>요구사항 추적표(RTM), TBD/TBC 관리대장, 요구 요약</td></tr><tr><td><code>02_interface/</code></td><td>인터페이스 계약(API 스키마·메시지·ICD)</td></tr><tr><td><code>03_design/</code></td><td>구조·상세 설계</td></tr><tr><td><code>04_test/</code></td><td>시험 계획·절차·결과</td></tr><tr><td><code>05_reports/</code></td><td>기술 검토 보고서 (단계와 무관한 의사결정 자료)</td></tr><tr><td><code>06_evidence/</code></td><td>작업별 시험 증적 (<code>&lt;작업ID&gt;/report.md</code>, 워커가 작성)</td></tr><tr><td><code>07_process/</code></td><td>개발 과정 기록: 프로세스·지표, 의사결정, 운영 이슈·교훈, 대시보드 스냅샷(<code>snapshots/</code>)</td></tr></tbody></table></div>
+<p>폴더 이름은 <code>&lt;번호 2자리&gt;_&lt;이름&gt;</code>이다. 번호는 진행 순서를 따른다. 새 단계 폴더가 생기면 다음 빈 번호를 붙인다. <code>05</code>~<code>07</code>은 단계와 무관하게 고정이다.</p>
+<h3>1.2 문서 파일명</h3>
+<pre><code>&lt;순번 2자리&gt;_&lt;문서명&gt;_&lt;YYYYMMDD&gt;.md
+예) 01_요구사항추적표_20261106.md</code></pre>
+<ul><li><strong>순번</strong>: 폴더 안에서 작성 순서대로 붙인다. 한 번 붙인 순번은 바꾸지 않고, 폐기한 문서의 순번은 다시 쓰지 않는다.</li><li><strong>문서명</strong>: 한글을 허용하고 띄어쓰기는 쓰지 않는다. 단어 구분은 <code>-</code>.</li><li><strong>날짜</strong>: 그 판(版)의 작성·개정일이다. 개정하면 <code>git mv</code>로 날짜를 바꾸고 문서 안 개정이력 표에 기록한다.</li><li>다른 문서에서 참조할 때는 날짜를 와일드카드로 쓴다. 예: <code>docs/01_requirements/01_요구사항추적표_*.md</code>. 개정해도 참조가 깨지지 않는다.</li><li><strong>보관 사본</strong>: 이전 판을 파일로 남겨야 하면 <code>&lt;순번&gt;_&lt;문서명&gt;_v&lt;판&gt;_&lt;YYYYMMDD&gt;.md</code>로 둔다. 순번은 원본과 같고, 문서 목록에는 원본만 올린다.</li><li>예외: <code>06_evidence/</code>는 작업 ID 폴더 구조(<code>&lt;작업ID&gt;/report.md</code>)를 쓴다. 폴더 안내 <code>README.md</code>는 번호를 붙이지 않는다. <code>07_process/snapshots/</code>는 대시보드 스냅샷 보관용이다.</li></ul>
+<h3>1.3 개정이력</h3>
+<p>모든 번호 문서는 머리말 아래에 개정이력 표를 둔다.</p>
+<div class="tw"><table><thead><tr><th>판</th><th>일자</th><th>내용</th><th>작성</th></tr></thead><tbody><tr><td>v1.0</td><td>2026-11-06</td><td>최초 작성</td><td></td></tr></tbody></table></div>
+<h2>2. 진행 단계</h2>
+<p>단계 검토회의를 쓰지 않는다. 진행 관리는 웨이브(W0~W3)와 작업 DAG로 한다. 단계 검토가 필요해지면 <code>kit.py upgrade --review-preset &lt;이름&gt;</code> 대신, kit.yaml의 <code>review_stages</code>를 켜고 폴더를 <code>git mv</code>로 맞춘다(<code>docs/05_reports/</code>는 그대로).</p>
+<h2>3. 검증 단계 (시험 환경)</h2>
+<div class="tw"><table><thead><tr><th>단계</th><th>환경</th><th>확인 목적</th></tr></thead><tbody><tr><td>① 로컬</td><td>개발 머신·컨테이너</td><td>기능 구현, 단위·시나리오 시험</td></tr><tr><td>② 통합 환경</td><td>스테이징·모사 환경</td><td>통합 동작, 자원 제한 상태</td></tr><tr><td>③ 대상 환경</td><td>실제 대상 하드웨어·플랫폼</td><td>성능·자원 점유</td></tr><tr><td>④ 운영</td><td>실사용 환경</td><td>최종 확인</td></tr></tbody></table></div>
+<p>시험 결과는 요구사항 추적표의 단계 칸에 기록한다: ● 통과, ◐ 진행·부분(모의 포함), ✕ 불합격, - 미착수.</p>
+<h2>4. 문서 목록</h2>
+<div class="tw"><table><thead><tr><th>폴더</th><th>문서</th><th>판</th></tr></thead><tbody><tr><td>01_requirements</td><td><a href="#doc/docs%2F01_requirements%2F01_%EC%9A%94%EA%B5%AC%EC%82%AC%ED%95%AD%EC%B6%94%EC%A0%81%ED%91%9C_20261106.md">01_요구사항추적표</a></td><td>v1.0 (2026-11-06)</td></tr><tr><td>01_requirements</td><td><a href="#doc/docs%2F01_requirements%2F02_TBD%EA%B4%80%EB%A6%AC%EB%8C%80%EC%9E%A5_20261106.md">02_TBD관리대장</a></td><td>v1.0 (2026-11-06)</td></tr><tr><td>07_process</td><td><a href="#doc/docs%2F07_process%2F01_%EA%B0%9C%EB%B0%9C%ED%94%84%EB%A1%9C%EC%84%B8%EC%8A%A4-%EC%A7%80%ED%91%9C_20261106.md">01_개발프로세스-지표</a></td><td>v1.0 (2026-11-06)</td></tr><tr><td>07_process</td><td><a href="#doc/docs%2F07_process%2F02_%EC%9D%98%EC%82%AC%EA%B2%B0%EC%A0%95%EA%B8%B0%EB%A1%9D_20261106.md">02_의사결정기록</a></td><td>v1.0 (2026-11-06)</td></tr><tr><td>07_process</td><td><a href="#doc/docs%2F07_process%2F03_%EC%9A%B4%EC%98%81%EC%9D%B4%EC%8A%88-%EA%B5%90%ED%9B%88_20261106.md">03_운영이슈-교훈</a></td><td>v1.0 (2026-11-06)</td></tr></tbody></table></div></div></template>
+</section>
+<section class="panel" id="p-git" hidden>
+<div class="card"><h3>최근 커밋 <span class="muted">4</span> <span class="muted small">git log --all</span></h3><div class="tw"><table class="compact gitc"><thead><tr><th>날짜</th><th>커밋</th><th title="이 커밋을 포함하는 브랜치. 테두리 강조 = 브랜치 끝 커밋">포함 브랜치</th><th>작성자</th><th>메시지</th></tr></thead><tbody>
+<tr><td class="nowrap small">2026-11-06 13:00</td><td class="mono">d3b8242</td><td class="refs"><span class="ref tip">req/R-API-001</span></td><td class="nowrap">todo team</td><td><a class="mono tl" href="#task/R-API-001" title="할 일 CRUD API">R-API-001</a> 할 일 생성·조회 라우터 초안</td></tr>
+<tr><td class="nowrap small">2026-11-06 11:30</td><td class="mono">0112217 <span class="muted small">머지</span></td><td class="refs"><span class="ref tip">main</span> <span class="ref tip">int/api</span> <span class="ref tip">int/web</span> <span class="muted small" title="main, int/api, int/web, req/R-API-001">+1</span></td><td class="nowrap">todo team</td><td><span class="tag">G</span> Merge int/common → main</td></tr>
+<tr><td class="nowrap small">2026-11-06 11:00</td><td class="mono">46d1305</td><td class="refs"><span class="ref">main</span> <span class="ref">int/api</span> <span class="ref tip">int/common</span> <span class="muted small" title="main, int/api, int/common, int/web, req/R-API-001">+2</span></td><td class="nowrap">todo team</td><td><a class="mono tl" href="#task/F-01" title="API 계약(OpenAPI)·공통 규약·모듈 골격">F-01</a> API 계약(OpenAPI)·모듈 골격</td></tr>
+<tr><td class="nowrap small">2026-11-06 10:00</td><td class="mono">1b7e69c</td><td class="refs"><span class="ref">main</span> <span class="ref">int/api</span> <span class="ref">int/common</span> <span class="muted small" title="main, int/api, int/common, int/web, req/R-API-001">+2</span></td><td class="nowrap">todo team</td><td><span class="tag">L0</span> orchestration kit v0.1.0 init</td></tr>
+</tbody></table></div></div>
+<div class="card"><h3>브랜치 <span class="muted">5</span></h3><div class="tw"><table class="compact gitc"><thead><tr><th>브랜치</th><th>종류</th><th>base</th><th class="num">ahead</th><th class="num">behind</th><th>머지 상태</th><th>최종 커밋</th><th>연결 작업</th></tr></thead><tbody>
+<tr><td class="mono">int/api</td><td>로컬</td><td class="mono small">main</td><td class="num">0</td><td class="num">0</td><td>변경 없음</td><td class="small">2026-11-06 11:30 [G] Merge int/common → main</td><td class="deps"><a class="mono tl" href="#task/I-API" title="API 서버 모듈 통합">I-API</a></td></tr>
+<tr><td class="mono">int/common</td><td>로컬</td><td class="mono small">main</td><td class="num">0</td><td class="num">1</td><td>머지됨</td><td class="small">2026-11-06 11:00 [F-01] API 계약(OpenAPI)·모듈 골격</td><td class="deps"><a class="mono tl" href="#task/F-01" title="API 계약(OpenAPI)·공통 규약·모듈 골격">F-01</a></td></tr>
+<tr><td class="mono">int/web</td><td>로컬</td><td class="mono small">main</td><td class="num">0</td><td class="num">0</td><td>변경 없음</td><td class="small">2026-11-06 11:30 [G] Merge int/common → main</td><td class="deps"><a class="mono tl" href="#task/I-WEB" title="웹 UI 모듈 통합">I-WEB</a></td></tr>
+<tr><td class="mono">main <span class="tag">HEAD</span></td><td>로컬</td><td class="mono small">origin/main</td><td class="num"></td><td class="num"></td><td>기준 없음</td><td class="small">2026-11-06 11:30 [G] Merge int/common → main</td><td class="deps"><a class="mono tl" href="#task/G-0" title="기반 머지 → int/api·int/web 생성">G-0</a> <a class="mono tl" href="#task/S-01" title="체계 통합 (API + 웹 종단)">S-01</a></td></tr>
+<tr><td class="mono">req/R-API-001</td><td>로컬</td><td class="mono small">int/api</td><td class="num">1</td><td class="num">0</td><td>진행</td><td class="small">2026-11-06 13:00 [R-API-001] 할 일 생성·조회 라우터 초안</td><td class="deps"><a class="mono tl" href="#task/R-API-001" title="할 일 CRUD API">R-API-001</a></td></tr>
+</tbody></table></div><p class="muted small">base: req/* → int/&lt;모듈&gt;, int/* → main, main → origin/main, 워커 브랜치 → 해당 작업의 통합 브랜치. 머지 판정은 <code>git branch --merged</code>에 포함되고 base의 first-parent 이력에 없는 경우(--no-ff 머지)다.</p></div>
+</section>
+</main>
+<aside id="drawer" aria-hidden="true"><div class="dbar"><button type="button" id="dclose" aria-label="닫기">닫기 ✕</button></div><div id="dbody"></div></aside>
+<footer class="muted small">데이터: 작업 트리 orchestration/tasks.yaml · /tmp/kit-verify.e2ly/demo2/todo-app</footer>
+<script>
+(function(){
+'use strict';
+var $=function(s,r){return (r||document).querySelector(s)};
+var $$=function(s,r){return Array.prototype.slice.call((r||document).querySelectorAll(s))};
+var TABS=['overview','dag','rtm','tbd','docs','git'];
+var drawer=$('#drawer'),dbody=$('#dbody'),svg=$('#dag-svg'),selected=null;
+function showTab(t){
+  $$('.tab').forEach(function(b){b.setAttribute('aria-selected',String(b.dataset.tab===t))});
+  $$('main > section.panel').forEach(function(s){s.hidden=(s.id!=='p-'+t)});
+}
+function closeDrawer(){drawer.classList.remove('open');drawer.setAttribute('aria-hidden','true');setSel(null)}
+function setSel(id){
+  selected=id;
+  if(!svg)return;
+  $$('.node',svg).forEach(function(n){var on=n.dataset.id===id;n.classList.toggle('sel',on);
+    if(on&&!$('#p-dag').hidden){try{n.scrollIntoView({block:'nearest',inline:'center'})}catch(_){}}});
+  hl(id);
+}
+function hl(id){
+  if(!svg)return;
+  if(!id){svg.classList.remove('focus');$$('.edge.hl',svg).forEach(function(e){e.classList.remove('hl')});$$('.node.nbh',svg).forEach(function(n){n.classList.remove('nbh')});return}
+  svg.classList.add('focus');
+  var nb={};nb[id]=1;
+  $$('.edge',svg).forEach(function(e){var on=e.dataset.from===id||e.dataset.to===id;e.classList.toggle('hl',on);if(on){nb[e.dataset.from]=1;nb[e.dataset.to]=1}});
+  $$('.node',svg).forEach(function(n){n.classList.toggle('nbh',!!nb[n.dataset.id])});
+}
+function openTask(id){
+  var tpl=document.getElementById('task-'+id);
+  if(!tpl){closeDrawer();return}
+  dbody.innerHTML='';dbody.appendChild(tpl.content.cloneNode(true));
+  drawer.classList.add('open');drawer.setAttribute('aria-hidden','false');drawer.scrollTop=0;
+  setSel(id);
+}
+function openDoc(key){
+  var tpl=null;$$('template[data-doc]').forEach(function(t){if(t.dataset.doc===key)tpl=t});
+  var view=$('#doc-view');
+  $$('tr[data-doc-row]').forEach(function(r){r.classList.toggle('cur',r.dataset.docRow===key)});
+  if(!tpl){view.innerHTML='<p class="muted">문서를 찾을 수 없습니다: '+key.replace(/</g,'&lt;')+'</p>';return}
+  view.innerHTML='';view.appendChild(tpl.content.cloneNode(true));view.scrollTop=0;
+  if(window.matchMedia('(max-width:1179px)').matches)view.scrollIntoView({block:'start'});
+}
+function focusEl(id){
+  var el=document.getElementById(id);if(!el)return;
+  var sec=el.closest('.rtm-sec');if(sec&&sec.hidden){resetFilters(sec.parentElement)}
+  if(el.closest('tr[hidden]')){resetFilters(el.closest('table'))}
+  el.scrollIntoView({block:'center'});
+  var row=el.tagName==='TR'?el:el.closest('tr');
+  if(row){row.classList.remove('flash');void row.offsetWidth;row.classList.add('flash')}
+}
+function route(){
+  var h=location.hash.slice(1),i=h.indexOf('/'),k=i<0?h:h.slice(0,i),v='';
+  try{v=i<0?'':decodeURIComponent(h.slice(i+1))}catch(e){v=h.slice(i+1)}
+  if(k==='task'){if(!document.querySelector('.tab[aria-selected=true]'))showTab('dag');openTask(v);return}
+  closeDrawer();
+  if(k==='doc'){showTab('docs');openDoc(v)}
+  else if(k==='req'){showTab('rtm');setTimeout(function(){focusEl('req-'+v)},0)}
+  else if(k==='tbdrow'){showTab('tbd');setTimeout(function(){focusEl('tbd-'+v)},0)}
+  else if(TABS.indexOf(k)>=0)showTab(k);
+  else showTab('overview');
+}
+window.addEventListener('hashchange',route);
+$('#dclose').addEventListener('click',function(){
+  closeDrawer();
+  var cur=document.querySelector('.tab[aria-selected=true]');
+  history.replaceState(null,'','#'+(cur?cur.dataset.tab:'dag'));
+});
+document.addEventListener('keydown',function(e){if(e.key==='Escape'&&drawer.classList.contains('open'))$('#dclose').click()});
+if(svg){
+  svg.addEventListener('click',function(e){var n=e.target.closest('.node');if(n)location.hash='task/'+encodeURIComponent(n.dataset.id)});
+  svg.addEventListener('keydown',function(e){var n=e.target.closest('.node');if(n&&(e.key==='Enter'||e.key===' ')){e.preventDefault();location.hash='task/'+encodeURIComponent(n.dataset.id)}});
+  svg.addEventListener('mouseover',function(e){var n=e.target.closest('.node');if(n)hl(n.dataset.id)});
+  svg.addEventListener('mouseleave',function(){hl(selected)});
+  svg.addEventListener('mouseout',function(e){var n=e.target.closest('.node');if(n&&!n.contains(e.relatedTarget))hl(selected)});
+}
+// 그래프/표 전환
+$$('[data-view-group]').forEach(function(g){
+  g.addEventListener('click',function(e){
+    var b=e.target.closest('button[data-view]');if(!b)return;
+    $$('button',g).forEach(function(x){x.setAttribute('aria-pressed',String(x===b))});
+    var panel=g.closest('section');
+    $$('[data-view-pane]',panel).forEach(function(p){p.hidden=p.dataset.viewPane!==b.dataset.view});
+    try{localStorage.setItem('todo-dash-dagview',b.dataset.view)}catch(_){}
+  });
+});
+try{var dv=localStorage.getItem('todo-dash-dagview');if(dv){var bb=$('[data-view-group=dag] button[data-view="'+dv+'"]');if(bb)bb.click()}}catch(_){}
+// 필터
+function applyFilters(box){
+  var target=document.getElementById(box.dataset.filterFor);if(!target)return;
+  var act={};$$('button[aria-pressed=true]',box).forEach(function(b){act[b.dataset.key]=b.dataset.val});
+  var items=target.tagName==='TABLE'?$$('tbody tr',target):$$(':scope > [data-product]',target);
+  items.forEach(function(r){
+    var ok=true;for(var k in act){if(act[k]!=='all'&&r.dataset[k]!==act[k])ok=false}
+    r.hidden=!ok;
+  });
+}
+function resetFilters(target){
+  if(!target)return;
+  $$('.filters[data-filter-for="'+target.id+'"]').forEach(function(box){
+    $$('button',box).forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.val==='all'))});applyFilters(box);
+  });
+}
+$$('.filters[data-filter-for]').forEach(function(box){
+  box.addEventListener('click',function(e){
+    var b=e.target.closest('button[data-key]');if(!b)return;
+    $$('button[data-key="'+b.dataset.key+'"]',box).forEach(function(x){x.setAttribute('aria-pressed',String(x===b))});
+    applyFilters(box);
+  });
+});
+// 로컬 서버로 열었을 때 새 빌드 감지
+var BID=(document.querySelector('meta[name=build-id]')||{}).content;
+if(/^https?:$/.test(location.protocol)&&BID){
+  setInterval(function(){
+    fetch(location.pathname,{cache:'no-store'}).then(function(r){return r.text()}).then(function(t){
+      var m=t.match(/name="build-id" content="([^"]+)"/);if(m&&m[1]!==BID)$('#newbuild').hidden=false;
+    }).catch(function(){});
+  },15000);
+  $('#reload').addEventListener('click',function(){location.reload()});
+}
+route();
+})();
+</script>
+</body>
+</html>
