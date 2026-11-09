@@ -74,3 +74,18 @@ kit.py bootstrap --target <tmp>/empty --dry-run
 ## 6. 하지 않은 것
 - 스킬 실제 설치(사용자가 정한다). 설치 명령: `./install.sh` (Orca 프로필 경로 `$ORCA_CLAUDE_CONFIG_DIR/skills/`), 일반 Claude Code는 `./install.sh --dir ~/.claude/skills`.
 - 실제 Orca Run 생성·워커 기동(dry-run으로 명령만 확인), 원격 머신 실행(ssh 대상 없음), `tailscale serve` 실제 공개, systemd 서비스 등록.
+
+## 7. v0.2.0 검증 (2026-11-09)
+키트 저장소에는 별도 시험 폴더가 없다(v0.3 후보 13). 아래 검사를 돌렸다. 출력은 세션 임시 폴더에만 썼다.
+
+| 항목 | 명령·방법 | 결과 |
+|---|---|---|
+| 파이썬 문법 | `python3 -m py_compile tools/*.py tools/dashboard/build.py skills/orca-orchestration-kit/scripts/kit.py` | 통과 |
+| init 설치 | 빈 git 저장소에 `kit.py init --answers examples/demo-project/answers.yaml --run --profile ros2` | 종료코드 0, `orchestration/templates/review-spec.md` 설치, 남은 자리표시자는 bootstrap이 채우는 `MASTER_RUN`·`WORK_RUN`뿐 |
+| DAG 검증 | 설치본 `validate_dag.py` / 키트 템플릿 tasks.yaml | 오류 0 · 경고 0 / 오류 0 (경고 4: 템플릿 예시 모듈 alpha·beta가 예제 kit.yaml에 없음, 정보성) |
+| 검토 명세 렌더링 | 설치본 tasks.yaml에 `REV-01`(layer L0, base main, `target: origin/int/api`, `spec_template: review-spec.md`) 추가 → `validate_dag.py`, `render_spec.py --stdout REV-01` | 오류 0. review-spec으로 렌더링, `{target}`·`{base}`·`{evidence_dir}` 치환, 남은 `{이름}` 0 |
+| L2 명세 | `render_spec.py --stdout F-01`, 예제 R-API-001·R-WEB-001 | '범위는 이 명세가 전부'·'문맥이 모자랄 때(부분 완료)' 절 포함 |
+| 범위 확인 명령(L-08) | 임시 저장소, 한글 경로 보고서만 든 브랜치와 코드가 섞인 브랜치 | `core.quotePath=false`: 보고서만 → 통과, 코드 포함 → 멈춤. quotePath 기본값: 보고서만인데도 멈춤(교훈에 적은 오탐 재현) |
+| upgrade | v0.1.0(274b01f)로 설치한 저장소에 v0.2.0 `upgrade` 미리보기 | 키트 갱신: MASTER·MANAGER·worker-spec·integration-spec·README(orchestration)·blocks/sim, 새 파일: review-spec, seed 변경 알림: AGENTS.md·kit.yaml |
+| 예제 재생성 | `examples/demo-project/make_demo.sh <임시 폴더>` | validate_dag 오류 0, 대시보드 경고 0. 바뀐 결과물: installed-tree(+review-spec), 렌더링 명세 3개(새 절), 대시보드(생성 시각·커밋 해시. 바닥글의 임시 경로는 v0.1 표기와 같은 꼴로 바꿈) |
+| 반입 검사 | 추가·변경 줄에서 원 프로젝트 도메인 단어·모듈 약어·내부 호스트·사설 주소·이메일·디스패치 ID 패턴 검사 | 0건. 출처 표기는 '실전 프로젝트 I-nn/D-nnn' 꼴만 쓴다(작업 지시에 따른 예외, v0.1의 '출처 표기 없음'에서 바뀜) |

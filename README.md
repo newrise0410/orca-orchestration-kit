@@ -8,7 +8,7 @@ AI 에이전트 다중 세션으로 소프트웨어를 개발하는 워크플로
 - 브랜치·머지 규약, 쓰기 범위 소유권, 번호 문서 체계, 요구사항 추적(RTM)·TBD·증적, 과정 기록 3종
 - 단일 HTML 대시보드(오프라인), 실행 격리 모듈(선택), 검토 단계 모듈(선택)
 
-버전: **v0.1.0** (2026-11-06)
+버전: **v0.2.0** (2026-11-09)
 
 ---
 
@@ -92,7 +92,7 @@ orchestration/tools/dashboard/serve.sh --orca            # 대시보드
 
 | 모듈 | 키트 경로 | 설치 위치 | 내용 |
 |---|---|---|---|
-| 세션 체계 | `templates/sessions/` | `orchestration/sessions/`, `orchestration/templates/` | `MASTER.md`, `MANAGER.md`, `worker-spec.md`(L2), `integration-spec.md`(L1) |
+| 세션 체계 | `templates/sessions/` | `orchestration/sessions/`, `orchestration/templates/` | `MASTER.md`, `MANAGER.md`(관문·검토·대기 절차 포함), `worker-spec.md`(L2), `integration-spec.md`(L1), `review-spec.md`(검토 작업, 작업별 `spec_template`) |
 | 작업 DAG | `templates/orchestration/tasks.yaml`, `tools/` | `orchestration/` | 스키마 주석·일반 예시, `validate_dag.py`(중복 ID·없는 deps·순환·중복 키·쓰기 범위 겹침), `render_spec.py`, `launch.sh`, `task_status.py`, `cleanup_worker.sh`(4조건), `sync_main.sh` |
 | 구조·규약 | `templates/orchestration/README.md` | `orchestration/README.md` | 계층, 브랜치·머지, 웨이브, 쓰기 범위 소유권 표, 동시 실행, 완료 기준, 소통, 종료 정리 |
 | 공통 규칙 | `templates/AGENTS.md`, `CLAUDE.md` | 저장소 루트 | 개인 이메일 금지, 배포 제한 파일 금지, 컨테이너 빌드, 쓰기 범위 밖은 ask |
@@ -139,6 +139,15 @@ orchestration/tools/dashboard/serve.sh --orca            # 대시보드
 - **모의 입력은 실제보다 많이 알 때가 많다.** 시나리오 시험의 데이터 흐름 전제(누가 무엇을 받는가)를 실제 구성과 대조한다.
 - **스크립트 함정:** `tr` 문자 범위(`.-\n`이 범위로 해석), GPU 모델 번호(`3090`)를 장치 인덱스로 해석 — 키트 스크립트에 반영했다.
 
+**관문·검토·대기 (v0.2, 상세는 [`docs/LESSONS.md`](docs/LESSONS.md) L-01 ~ L-13)**
+- **main 머지 관문 = 범위 확인 → build → 전체 시험 → 체계 스모크.** 스모크는 기본 설정으로(덧씌움 금지) 돈다. 관문 체크아웃은 끝날 때까지 건드리지 않는다. 시뮬 관문은 실시간 비율·부하 기준 미달이면 PASS라도 무효다. 관문 도구는 전제 상태를 기다리고 실패 로그를 남긴다.
+- **범위 확인은 실패하면 멈추게 쓴다.** `;`로 이은 확인은 출력만 하고 머지를 막지 못한다. 비ASCII 경로는 `core.quotePath=false`가 있어야 비교된다.
+- **검토 보고서 브랜치는 기준 브랜치에서 만든다.** 대상 위에 커밋한 보고서를 머지하면 검토가 막은 코드까지 들어온다. 보고서는 경로만 가져온다.
+- **코드 검토는 실행으로 재현되는 반례만 차단한다.** 설계 검토는 수렴 모양을 보고 마지막 좁은 검토로 닫는다. 같은 계열 지적이 반복되면 구조 수정, 그래도면 범위 축소를 사용자에게 묻는다. 결함 수정과 새 기능은 섞지 않는다.
+- **끝난 작업 뒤의 일은 새 작업으로 낸다.** 실행 중 워커에 보낸 메시지는 후속 작업이 된다. '이어서 하라'를 보내면 양쪽이 서로를 기다린다. 대기 전에 실행 중 워커가 있는지 확인하고, 정지 점검으로 멈춘 이유를 한 줄로 분류한다. 마스터 보고는 `--to run:`.
+- **큰 구현은 세션당 4묶음 안팎으로 쪼갠다.** 문맥이 모자라면 부분 완료 + 남은 목록으로 끝낸다.
+- **무인 셸 명령:** `pgrep -f` 패턴은 자기 명령줄과 맞는다(pid로 기다린다). 변수 경로 rm은 `"${VAR:?}"`로 쓴다(훅 프롬프트에 멈추지 않게).
+
 ---
 
 ## 5. 저장소 구조
@@ -146,7 +155,7 @@ orchestration/tools/dashboard/serve.sh --orca            # 대시보드
 README.md  install.sh  kit-manifest.yaml  VERSION
 templates/
   AGENTS.md  CLAUDE.md
-  sessions/       MASTER.md  MANAGER.md  worker-spec.md  integration-spec.md
+  sessions/       MASTER.md  MANAGER.md  worker-spec.md  integration-spec.md  review-spec.md
   orchestration/  README.md  tasks.yaml  kit.yaml  state/  templates/{evidence.md, blocks/*.md}
   docs/           README.md  requirements/  evidence/  process/  review-stages/
 tools/
@@ -155,7 +164,7 @@ tools/
   run/            run.sh run.conf.example cleanup_hook.sh metrics.sh README.md profiles/ros2/
 skills/orca-orchestration-kit/   SKILL.md  scripts/kit.py
 examples/demo-project/           answers.yaml tasks·RTM·TBD·증적, specs/, dashboard/index.html, make_demo.sh
-docs/                            VERIFY.md  DESIGN-NOTES.md
+docs/                            VERIFY.md  DESIGN-NOTES.md  LESSONS.md
 ```
 
 ---
@@ -164,6 +173,7 @@ docs/                            VERIFY.md  DESIGN-NOTES.md
 
 | 버전 | 일자 | 내용 |
 |---|---|---|
+| v0.2.0 | 2026-11-09 | 실전 프로젝트 후반 교훈 13건 반영(`docs/LESSONS.md` L-01 ~ L-13, 근거 `docs/DESIGN-NOTES.md` 3장). MANAGER.md에 main 머지 관문(범위 확인·체크아웃 분리·유효 회차·미추적 증적)·검토 작업·대기와 정지 점검 장 추가, 후속 작업·실행 중 send·수정/기능 분리·작업 크기 규칙. 검토 명세 `review-spec.md` 신설(기준 브랜치·읽기 전용 대상·실행 재현 H), `render_spec.py`가 작업별 `spec_template`·`{target}`을 읽음. worker-spec에 범위·부분 완료, AGENTS에 '셸 명령'(pid 대기, `${VAR:?}`), integration-spec·sim 블록에 관문 유효성, MASTER에 정지 점검·범위 축소 선택지, 구조 문서 완료 기준·소통 표 갱신, 스킬에 '운영 점검'. **기존 설치본:** `upgrade`로 managed 파일 갱신, AGENTS.md(seed)는 `--include-seed` diff를 보고 '셸 명령' 절을 손으로 옮긴다. 검증: `docs/VERIFY.md` 7장 |
 | v0.1.0 | 2026-11-06 | 최초 추출: 세션 3계층 명세, tasks.yaml 스키마·DAG 검증기·렌더러·투입·정리 도구, 브랜치·머지 규약, 문서 체계(RTM·TBD·증적·과정 기록 3종, 검토 단계 선택 모듈), 설정 기반 대시보드, 실행 격리 모듈(+ROS 2 프로필), Claude Code 스킬(init·bootstrap·status·upgrade), 예제 프로젝트. 검증: `docs/VERIFY.md` |
 
 다음 버전 후보와 일반화 판단 기록: [`docs/DESIGN-NOTES.md`](docs/DESIGN-NOTES.md).

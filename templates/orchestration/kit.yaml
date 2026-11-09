@@ -33,7 +33,8 @@ paths:
   tbd: "docs/{{REQ_FOLDER}}/02_TBD관리대장_*.md"
   skip_dirs: [snapshots]
 
-# 명세 템플릿 선택 (layer별). 없으면 default
+# 명세 템플릿 선택 (layer별). 없으면 default.
+# 작업 항목에 spec_template: <파일>을 주면 그것이 우선한다(예: 검토 작업은 review-spec.md)
 spec_templates:
   L1: integration-spec.md
   default: worker-spec.md

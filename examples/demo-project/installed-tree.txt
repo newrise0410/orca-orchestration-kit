@@ -27,6 +27,7 @@ orchestration/templates/blocks/sim.md
 orchestration/templates/blocks/sim.pending.md
 orchestration/templates/evidence.md
 orchestration/templates/integration-spec.md
+orchestration/templates/review-spec.md
 orchestration/templates/worker-spec.md
 orchestration/tools/cleanup_worker.sh
 orchestration/tools/dashboard/build.py
