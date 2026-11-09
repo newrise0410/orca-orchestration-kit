@@ -94,19 +94,26 @@ L2 작업은 아래를 모두 만족해야 `worker_done`을 보낼 수 있다.
 
 L1 작업은 소속 req/*를 모두 머지하고, 모듈 스모크를 통과하고, `docs/06_evidence/I-<모듈>/report.md`를 작성해야 완료다.
 
+**`{{MAIN_BRANCH}}` 머지 관문**(매니저, `sessions/MANAGER.md` 3장): 머지 범위 확인(실패하면 멈춤) → build → 전체 시험 → **체계 스모크**(모듈 사이 실제 값으로 핵심 흐름 하나, 시험 전용 덧씌움 없이 기본 설정, 몇 분). 관문은 전용 체크아웃에서 돌리고 결과에 실행 HEAD와 회차 유효성(시뮬이면 실시간 비율·부하)을 남긴다. 기준 미달 회차는 PASS여도 무효다.
+
+**검토 작업**(`templates/review-spec.md`): 보고서 브랜치는 `{{MAIN_BRANCH}}` 기준, 대상은 읽기 전용 체크아웃. 머지 차단은 실행으로 재현되는 반례만. 보고서는 경로만 가져온다.
+
+**부분 완료:** 문맥이 모자란 L2는 끝난 묶음까지 커밋·푸시하고 `결과: 부분` + 남은 목록으로 끝낸다. 남은 것은 매니저가 새 작업으로 낸다.
+
 ## 7. 소통
 
 | 방향 | 명령 |
 |---|---|
 | L2·L1 → 매니저 질문 | `orca orchestration ask` (그다음 턴을 끝낸다) |
-| 매니저 → 워커 지시 | `orca orchestration send --to dispatch:<id>` (보내기 전에 `worker-list`로 최신 디스패치 확인) |
-| 매니저 → 마스터 보고·질문 | `orca orchestration send --to run:<마스터 Run> --type status\|question` |
+| 매니저 → 워커 정보 | `orca orchestration send --to dispatch:<id>` (보내기 전에 `worker-list`로 최신 디스패치 확인). **실행 중 send는 원 작업에 섞이지 않고 후속 작업이 된다** — 짧은 정보만 보낸다. 범위는 명세에 처음부터 넣는다 |
+| 매니저 → 워커 새 일 | 끝난 작업 뒤의 일은 **새 작업**(`launch.sh <새 ID>` = task-create + worker-start). 터미널 입력·메시지로 '이어서 하라'고 하지 않는다 |
+| 매니저 → 마스터 보고·질문 | `orca orchestration send --to run:<마스터 Run> --type status\|question` (`dispatch:`로 보내지 않는다. 후속 작업이 중첩된다) |
 | 마스터 → 매니저 지시 | `orca orchestration send --to run:<작업 Run>` |
 
 ### 7.1 종료 정리
 머지가 끝난 워커는 **머지 직후 바로 정리**한다: `orchestration/tools/cleanup_worker.sh <워크트리> <원격 브랜치> <상위 브랜치>`.
 - 정리 조건(모두 만족해야 한다. 하나라도 못 맞추면 지우지 않고 이유를 출력한다)
-  1. `worker_done`(succeeded)으로 보고를 마쳤다. 끝나지 않은 디스패치가 없다.
+  1. `worker_done`(succeeded)으로 보고를 마쳤다. 끝나지 않은 디스패치가 없다(실행 중 send로 생긴 후속 디스패치 포함 — `worker-show`로 확인하고, 남았으면 처리하거나 멈춘 뒤 해제한다).
   2. 작업 브랜치가 원격에 푸시됐다(로컬 HEAD = 원격 브랜치).
   3. 그 브랜치가 상위 브랜치에 머지됐다.
   4. 워크트리에 커밋 안 된 변경이 없다.

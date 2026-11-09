@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """tasks.yaml 항목을 명세 템플릿으로 렌더링해 specs/<ID>.md로 저장한다.
 
-템플릿: orchestration/templates/<kit.yaml spec_templates[layer] 또는 default>
+템플릿: orchestration/templates/<작업의 spec_template 또는 kit.yaml spec_templates[layer] 또는 default>
+  - 작업마다 spec_template: review-spec.md 처럼 주면 그것이 우선한다(검토 작업 등).
   - 자리표시자: {id} {title} {layer} {module} {module_name} {reqs} {branch} {base} {write_scope}
                {acceptance} {perf_line} {deps_block} {env_block} {evidence} {evidence_dir}
-               {stage} {rtm} {tbd} {main_branch} {project}
+               {stage} {rtm} {tbd} {main_branch} {project} {target}(검토 대상, 없으면 '-')
                그 밖에 작업 항목의 문자열 필드도 {필드명}으로 쓸 수 있다.
   - 알려진 이름만 바꾸고 나머지 중괄호는 그대로 둔다(코드 예시가 깨지지 않는다).
 실행 환경 블록: orchestration/templates/blocks/
@@ -97,6 +98,7 @@ def render(t, tasks, cfg, runtime, tpl_dir, warn):
         "tbd": kitlib.cfg_get(cfg, "paths.tbd", "docs/01_requirements/02_TBD관리대장_*.md"),
         "main_branch": kitlib.cfg_get(cfg, "project.main_branch", "main"),
         "project": kitlib.cfg_get(cfg, "project.name", ""),
+        "target": t.get("target", "-"),
     }
     for k, v in t.items():   # 작업 항목의 다른 문자열 필드
         if isinstance(v, (str, int, float)) and k not in vals:
@@ -105,9 +107,10 @@ def render(t, tasks, cfg, runtime, tpl_dir, warn):
     # 예전 템플릿 호환: {sim_block}
     vals["sim_block"] = vals["env_block"]
     sel = cfg.get("spec_templates") or {}
-    name = sel.get(str(t.get("layer")), sel.get("default", "worker-spec.md"))
+    name = t.get("spec_template") or sel.get(str(t.get("layer")), sel.get("default", "worker-spec.md"))
     tpl = tpl_dir / name
     if not tpl.is_file():
+        warn(f"{t['id']}: 명세 템플릿 {name} 없음 → worker-spec.md로 대신 렌더링 ({tpl_dir})")
         tpl = tpl_dir / "worker-spec.md"
     return fill(tpl.read_text(encoding="utf-8"), vals)
 

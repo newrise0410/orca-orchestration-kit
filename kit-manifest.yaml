@@ -6,7 +6,7 @@
 #   module: core(항상) / run(실행 격리) / ros2(ROS 2 프로필) / review(검토 단계)
 #   render: true면 {{...}}를 채운다. keep: 설치 때 남겨 둘 자리표시자(부트스트랩에서 채움)
 #   mode:  실행 권한 등 (기본 644)
-version: 0.1.0
+version: 0.2.0
 
 files:
   # ── 공통 규칙
@@ -18,6 +18,7 @@ files:
      keep: [MASTER_RUN, WORK_RUN]}
   - {src: templates/sessions/worker-spec.md, dst: orchestration/templates/worker-spec.md, kind: managed, module: core, render: true}
   - {src: templates/sessions/integration-spec.md, dst: orchestration/templates/integration-spec.md, kind: managed, module: core, render: true}
+  - {src: templates/sessions/review-spec.md, dst: orchestration/templates/review-spec.md, kind: managed, module: core, render: true}
   # ── 오케스트레이션
   - {src: templates/orchestration/README.md, dst: orchestration/README.md, kind: managed, module: core, render: true}
   - {src: templates/orchestration/kit.yaml, dst: orchestration/kit.yaml, kind: seed, module: core, render: true}
