@@ -1,15 +1,14 @@
 # 검토 {id}: {title}
 
 당신은 {{PROJECT_NAME}} 개발의 **검토 세션**이다. 이 검토 하나만 수행한다. **코드를 고치지 않는다.** 보고서만 쓴다.
-먼저 저장소 루트의 `AGENTS.md`(작업 규칙)와 `orchestration/README.md`(구조)를 읽어라.
+이 명세와 저장소 루트 `AGENTS.md`(작업 규칙)로 시작한다. 검토 대상 작업의 명세는 `orchestration/specs/<대상 ID>.md`다.
 
 ## 대상과 브랜치
 - 검토 대상: `{target}`. 시작할 때 커밋 해시로 고정하고(`git rev-parse {target}`) 보고서 맨 위에 적는다.
-- 보고서 브랜치: `{branch}` (기준: `{base}`). 워크트리는 Orca가 `{base}`에서 만들어 준다. 원격에는 `git push origin HEAD:{branch}`로 푸시한다.
+- 보고서 브랜치: `{branch}` (기준: `{base}`). 워크트리는 Orca가 `{base}`에서 만들어 준다. 커밋한 뒤 `{push}`로 올린다.
 - **검토 대상 위에 보고서를 커밋하지 마라.** 보고서 브랜치가 대상에서 갈라지면 보고서를 반영할 때 검토가 막은 코드까지 함께 들어간다. 보고서 브랜치는 반드시 `{base}` 기준이다.
 - **검토 대상은 별도 읽기 전용 체크아웃에서 본다:**
   ```bash
-  git fetch origin
   R="../{id}-target"
   git worktree add --detach "$R" {target}
   # ... 읽기·시험 실행은 "$R"에서. 거기서는 커밋하지 않는다
@@ -20,7 +19,7 @@
 - `{evidence_dir}`만 쓴다. 그 밖은 읽기 전용이다. 반례 시험 코드도 이 폴더에 둔다(대상 저장소 시험 폴더에 넣지 않는다).
 - 커밋·푸시 전에 범위를 확인한다. 범위 밖이 있으면 멈춘다(비ASCII 경로 비교를 위해 `core.quotePath=false`):
   ```bash
-  test -z "$(git -c core.quotePath=false diff --name-only origin/{base}...HEAD | grep -v '^{evidence_dir}')" \
+  test -z "$(git -c core.quotePath=false diff --name-only {ref}{base}...HEAD | grep -v '^{evidence_dir}')" \
     || { echo "범위 밖 변경"; exit 1; }
   ```
 
@@ -35,7 +34,7 @@
 ## 산출물
 1. 보고서 `{evidence}`: 대상 커밋 해시, 검토 범위, 해소 판정 표, 지적 표(ID·심각도·원인 계열·위치·재현 방법·권고), 판정(머지 차단 여부와 그 근거가 된 H 목록).
 2. 반례 시험·재현 로그(있으면) `{evidence_dir}`.
-3. `[{id}]` 접두 커밋을 `{branch}`에 올리고 푸시한다. 매니저는 보고서를 경로만 가져간다.
+3. `[{id}]` 접두 커밋을 `{branch}`에 올리고 `{push}`. 매니저는 보고서를 경로만 가져간다.
 
 ## 실행 환경
 {env_block}

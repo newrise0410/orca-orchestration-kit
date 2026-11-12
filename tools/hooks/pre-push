@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+"""orca-orchestration-kit pre-push 훅 (install_hooks.sh가 공용 git 디렉터리 hooks/에 깐다. 모든 워크트리에 걸린다).
+
+막는 것
+  1. kit.yaml project.git_remote가 빈 값(로컬 전용 운영)인데 원격으로 push  — 로컬 브랜치 갱신(`git push . HEAD:<브랜치>`)은 통과
+  2. project.protected_branches(예: [main])로 push — 승인 뒤 KIT_PUSH_OK=1을 붙여야 통과 (원격 push가 배포를 일으키는 저장소)
+  3. 올리는 커밋에 배포 제한 파일(project.restricted 패턴)이 들어 있음
+우회가 필요하면 사람이 판단해 git push --no-verify (무인 세션은 쓰지 않는다).
+"""
+import fnmatch
+import os
+import subprocess
+import sys
+
+ZERO = "0" * 40
+
+
+def git(*a):
+    return subprocess.run(["git", *a], capture_output=True, text=True).stdout
+
+
+def load_cfg():
+    top = git("rev-parse", "--show-toplevel").strip()
+    p = os.path.join(top, "orchestration", "kit.yaml")
+    try:
+        import yaml
+        with open(p, encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except Exception:  # noqa: BLE001 — 설정을 못 읽으면 검사하지 않는다
+        return {}
+
+
+def restricted_hit(path, pats):
+    base = path.rsplit("/", 1)[-1]
+    for p in pats:
+        p = str(p).strip()
+        if not p:
+            continue
+        if p.endswith("/"):
+            d = p.strip("/")
+            if path.startswith(d + "/") or ("/" + d + "/") in ("/" + path):
+                return p
+        elif fnmatch.fnmatch(path, p) or fnmatch.fnmatch(base, p):
+            return p
+    return None
+
+
+def main():
+    remote, url = (sys.argv[1:3] + ["", ""])[:2]
+    cfg = load_cfg()
+    proj = cfg.get("project") or {}
+    local_only = "git_remote" in proj and not str(proj.get("git_remote") or "").strip()
+    is_local = remote in (".", "") or url in (".", git("rev-parse", "--git-common-dir").strip())
+    protected = [str(b) for b in proj.get("protected_branches") or []]
+    pats = proj.get("restricted") or []
+    errs = []
+    for line in sys.stdin:
+        parts = line.split()
+        if len(parts) != 4:
+            continue
+        lref, lsha, rref, rsha = parts
+        if lsha == ZERO:
+            continue  # 삭제
+        b = rref.replace("refs/heads/", "", 1)
+        if not is_local and local_only:
+            errs.append(f"{rref}: 이 저장소는 로컬 전용 운영이다(kit.yaml project.git_remote가 비어 있음). 브랜치 갱신은 git push . HEAD:{b}")
+            continue
+        if not is_local and b in protected and os.environ.get("KIT_PUSH_OK") != "1":
+            errs.append(f"{rref}: 보호 브랜치다. 승인 뒤 KIT_PUSH_OK=1 git push ... 로 올린다")
+        if pats and not is_local:
+            rng = [lsha, "--not", f"--remotes={remote}"] if rsha == ZERO else [f"{rsha}..{lsha}"]
+            files = {f for f in git("-c", "core.quotePath=false", "log", "--format=", "--name-only", *rng).splitlines() if f}
+            for f in sorted(files):
+                p = restricted_hit(f, pats)
+                if p:
+                    errs.append(f"{rref}: 배포 제한 파일 {f} (패턴 {p})")
+    if errs:
+        print("pre-push(orca-orchestration-kit): push를 막았다", file=sys.stderr)
+        for e in errs[:30]:
+            print("  - " + e, file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """tasks.yaml(작업 DAG) 검증기.
 
-오류(종료코드 1): YAML 파싱 실패, tasks 형식 오류, id 누락, 중복 ID, 없는 deps, 자기 의존, 순환,
+오류(종료코드 1): YAML 파싱 실패, tasks 형식 오류, id 누락, 중복 ID(보관 파일 포함), 없는 deps, 자기 의존, 순환,
                  한 작업 안의 중복 키(PyYAML은 조용히 덮어써서 값이 사라진다)
 경고:            알 수 없는 layer·status·module, 빈 acceptance, L2의 기준 브랜치가 통합 브랜치가 아님,
-                 선행작업이 더 늦은 웨이브, 동시에 돌 수 있는 작업끼리 write_scope 겹침
+                 선행작업이 더 늦은 웨이브, 동시에 돌 수 있는 작업끼리 write_scope 겹침, model 없는 effort
+보관 파일(orchestration/tasks.archive.yaml, archive_tasks.py가 만든다)의 작업은 merged 선행 작업으로 인정한다.
 
 사용:
     python3 orchestration/tools/validate_dag.py [--tasks PATH] [--config PATH] [--repo PATH] [--strict] [--json] [-q]
@@ -92,8 +93,10 @@ def scope_overlap(a, b):
     return False
 
 
-def validate(text, cfg):
+def validate(text, cfg, archived=()):
     errors, warnings = [], []
+    archived = [t for t in archived if isinstance(t, dict) and t.get("id")]
+    arch_ids = {str(t["id"]) for t in archived}
     try:
         data, dups = kitlib.load_tasks_text(text)
     except Exception as e:  # yaml.YAMLError 등
@@ -120,6 +123,9 @@ def validate(text, cfg):
         tasks.append(t)
     ids = [str(t["id"]) for t in tasks]
     idset = set(ids)
+    for tid in sorted(idset & arch_ids):
+        errors.append(f"중복 ID {tid}: tasks.yaml과 보관 파일에 둘 다 있다")
+    known = idset | arch_ids
     deps = {str(t["id"]): kitlib.as_list(t.get("deps")) for t in tasks}
 
     module_keys = {str(m.get("key")) for m in (cfg.get("modules") or []) if isinstance(m, dict)}
@@ -135,7 +141,7 @@ def validate(text, cfg):
             edges += 1
             if d == tid:
                 errors.append(f"{tid}: 자기 자신에 의존")
-            elif d not in idset:
+            elif d not in known:
                 errors.append(f"{tid}: 없는 선행작업 {d}")
         layer = str(t.get("layer", ""))
         if layer not in kitlib.LAYERS:
@@ -148,6 +154,8 @@ def validate(text, cfg):
             warnings.append(f"{tid}: kit.yaml modules에 없는 모듈 {mod!r}")
         if not str(t.get("acceptance") or "").strip():
             warnings.append(f"{tid}: acceptance 비어 있음")
+        if t.get("effort") and not t.get("model"):
+            warnings.append(f"{tid}: effort는 model과 함께 줘야 한다(Orca --effort는 --model이 필요)")
         if layer == "L2" and t.get("base") and not str(t["base"]).startswith(int_prefix):
             warnings.append(f"{tid}: L2인데 base가 통합 브랜치({int_prefix}*)가 아님: {t['base']}")
     cycles = find_cycles(ids, {k: [d for d in v if d in idset] for k, v in deps.items()})
@@ -155,7 +163,7 @@ def validate(text, cfg):
         errors.append("순환 의존: " + " → ".join(c))
 
     # 웨이브 순서 (선행작업이 더 늦은 웨이브면 경고)
-    wave = {str(t["id"]): wave_of(t, cfg) for t in tasks}
+    wave = {str(t["id"]): wave_of(t, cfg) for t in list(archived) + tasks}
     worder = {w: i for i, w in enumerate(wave_keys)}
     for t in tasks:
         tid = str(t["id"])
@@ -221,7 +229,7 @@ def validate(text, cfg):
         return out
 
     stats = {
-        "tasks": len(tasks), "edges": edges,
+        "tasks": len(tasks), "archived": len(arch_ids), "edges": edges,
         "roots": sorted(v for v in ids if not [d for d in deps[v] if d in idset]),
         "leaves": sorted(v for v in ids if dependents[v] == 0),
         "longest_chain": max(depth.values()) if depth else None,
@@ -248,7 +256,7 @@ def main(argv=None):
     if not path.is_file():
         print(f"오류: {path} 없음", file=sys.stderr)
         return 2
-    res = validate(path.read_text(encoding="utf-8"), cfg)
+    res = validate(path.read_text(encoding="utf-8"), cfg, kitlib.load_archive(repo, cfg))
     res["file"] = str(path)
     if a.json:
         print(json.dumps(res, ensure_ascii=False, indent=2))
@@ -256,7 +264,7 @@ def main(argv=None):
         s = res["stats"]
         if s and not a.quiet:
             print(f"{path}")
-            print(f"  작업 {s['tasks']} · 의존 간선 {s['edges']} · 시작점 {len(s['roots'])} · 끝점 {len(s['leaves'])} · 최장 사슬 {s['longest_chain']}")
+            print(f"  작업 {s['tasks']}" + (f" (+보관 {s['archived']})" if s.get("archived") else "") + f" · 의존 간선 {s['edges']} · 시작점 {len(s['roots'])} · 끝점 {len(s['leaves'])} · 최장 사슬 {s['longest_chain']}")
             print("  웨이브 " + ", ".join(f"{k} {v}" for k, v in s["waves"].items()))
             print("  계층 " + ", ".join(f"{k} {v}" for k, v in sorted(s["layers"].items())))
             print("  상태 " + ", ".join(f"{k} {v}" for k, v in s["status"].items()))

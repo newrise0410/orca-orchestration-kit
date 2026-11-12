@@ -89,3 +89,19 @@ kit.py bootstrap --target <tmp>/empty --dry-run
 | upgrade | v0.1.0(274b01f)로 설치한 저장소에 v0.2.0 `upgrade` 미리보기 | 키트 갱신: MASTER·MANAGER·worker-spec·integration-spec·README(orchestration)·blocks/sim, 새 파일: review-spec, seed 변경 알림: AGENTS.md·kit.yaml |
 | 예제 재생성 | `examples/demo-project/make_demo.sh <임시 폴더>` | validate_dag 오류 0, 대시보드 경고 0. 바뀐 결과물: installed-tree(+review-spec), 렌더링 명세 3개(새 절), 대시보드(생성 시각·커밋 해시. 바닥글의 임시 경로는 v0.1 표기와 같은 꼴로 바꿈) |
 | 반입 검사 | 추가·변경 줄에서 원 프로젝트 도메인 단어·모듈 약어·내부 호스트·사설 주소·이메일·디스패치 ID 패턴 검사 | 0건. 출처 표기는 '실전 프로젝트 I-nn/D-nnn' 꼴만 쓴다(작업 지시에 따른 예외, v0.1의 '출처 표기 없음'에서 바뀜) |
+
+## 8. v0.3.0 검증 (2026-11-12)
+출력은 세션 임시 폴더에만 썼다. 실사용 프로젝트는 **읽기만** 했고(복제본으로 시험), 검증 뒤 그 저장소의 `git status`가 비어 있음을 확인했다.
+
+| 항목 | 명령·방법 | 결과 |
+|---|---|---|
+| 문법 | `python3 -m py_compile tools/*.py tools/dashboard/build.py tools/hooks/pre-push skills/.../kit.py`, `bash -n` 셸 스크립트 전부 | 통과 |
+| 회귀 시험 | `tests/smoke.sh` — init(로컬 전용), 자리표시자 잔여, 렌더링(`{push}`), launch 투입 조건(선행·게이트·hold·기준 브랜치·기존 워크트리 생성 플래그·L1 `--keep-open`), `--review`·`--retry`, effort 경고, 보관·보관 뒤 검증·status·대시보드, sync_main(체크아웃 유지·ff), pre-push(로컬 전용·`git push .` 통과·보호 브랜치·`KIT_PUSH_OK`·배포 제한 파일), evidence_lint, slot, bootstrap(`--step` 필수·manager 플래그·abandon `--work-run`), cleanup 보류, upgrade(3방향 자동 병합·키트 밖 파일 보존) | **48/48 통과** |
+| 정지 점검(실사용, 읽기 전용) | `kit.py status --target <실사용> --stall` | 진행 중 0(이전 판은 끝난 워커 9개를 '진행'으로 셈) · 전체 367개 페이지 순회(이전 판은 100에서 잘림) · '할당 누락' 3건(마스터 승인·이월로 미룬 작업 → `hold` 필드로 구분) · 키트 새 버전 알림 |
+| 보관(실사용 복제본) | `archive_tasks.py` (작업 75개, 주석·흐름형 혼합) | 71개 이동, tasks.yaml 103,276B → 8,017B, 검산 통과, `validate_dag` 오류 0(경고 183 → 1: 끝난 작업끼리의 쓰기 범위 겹침이 빠짐), 보관 작업을 선행으로 둔 명세 렌더링 정상 |
+| upgrade(실사용 복제본, v0.1.0 → v0.3.0) | `kit.py upgrade --summary` → `git_remote: ""` 추가 후 `--apply` | 자동 병합 1(orchestration/README.md), 키트 갱신 8, 새 파일 9, 충돌 5(로컬 push 문구와 겹친 명세·도구 → 병합 표시 든 `.kit-new`), 키트 밖 파일 2(프로젝트 자체 review-spec·evidence_lint 보존 + `.kit-new`), seed 3 알림 |
+| 문맥 크기 | v0.2 → v0.3 바이트 | SKILL.md 9,725 → 4,476 · MANAGER.md 17,423 → 12,551(관문·검토 절차는 필요할 때 여는 파일로) · AGENTS.md 4,152 → 4,735(읽을 것·위생 규칙 추가) · 렌더된 L2 명세 4,381 → 4,421. 워커가 처음에 읽던 tasks.yaml·구조 문서(실사용 103KB + 10KB)를 읽지 않게 했다 |
+| 예제 재생성 | `examples/demo-project/make_demo.sh <임시 폴더>` | validate_dag 오류 0, 대시보드 경고 0. 바뀐 결과물: installed-tree(+procedures·새 도구), 렌더링 명세 3개, 대시보드. 작업 폴더 경로는 스크립트가 `/tmp/kit-verify/demo`로 바꾼다 |
+| 반입 검사 | 추가·변경 파일 전체에서 실사용 프로젝트 이름·호스트·계정·이메일·Run/dispatch/terminal ID·사설 주소 패턴 | 0건(시험 픽스처의 가짜 경로 `/home/someone/` 1건은 의도) |
+
+**하지 않은 것:** Orca 실기동(워커 생성, 실행 중·끝난 워커에 send 했을 때의 의미 재확인). dry-run과 Orca 1.4.255 CLI 도움말·오케스트레이션 가이드 대조만 했다. 실사용 프로젝트에 upgrade를 실제로 적용하지 않았다(사용자 결정).

@@ -3,8 +3,8 @@
 
 명령
   init       대상 저장소에 키트 파일을 깐다(kit.yaml·tasks.yaml W0 초안 생성 포함)
-  bootstrap  Orca 단계: 마스터 Run 생성 → 매니저 워커 기동 → worker-abandon → 대시보드 기동
-  status     메일함·작업·워커·DAG 현황 요약
+  bootstrap  Orca 단계(한 번에 하나): master-run → manager → (기동 보고 대기) → abandon → hooks → dashboard. 새 마스터 세션은 attach
+  status     현황·정지 점검 (본체: <키트>/tools/status.py). --stall: 정지 점검만
   upgrade    키트 새 버전을 기존 프로젝트에 반영 (기본은 diff만 보여 준다. --apply로 적용)
 
 공통: --target <대상 저장소> (기본 현재 디렉터리), --dry-run (아무것도 쓰거나 실행하지 않고 계획만 출력)
@@ -102,7 +102,12 @@ def build_vars(ans, today):
     folders = [s["folder"] for s in stages] if stages else DEFAULT_FOLDERS
     req_folder = folders[0]
     run_on = bool(ans.get("run"))
-    restricted = [x.strip() for x in (ans.get("restricted") or "*.pdf,.orca/").split(",") if x.strip()]
+    rs = ans.get("restricted") or "*.pdf,.orca/"
+    restricted = [x.strip() for x in (rs.split(",") if isinstance(rs, str) else rs) if str(x).strip()]
+    rem = ans.get("git_remote", "origin")
+    rem = "" if rem in (None, False) else str(rem).strip()
+    prot = ans.get("protected") or ""
+    prot = [x.strip() for x in (prot.split(",") if isinstance(prot, str) else prot) if str(x).strip()]
     build_cmd = ans.get("build_cmd") or ("scripts/run/run.sh 'scripts/dev/build.sh'" if run_on else "scripts/dev/build.sh")
     test_cmd = ans.get("test_cmd") or ("scripts/run/run.sh 'scripts/dev/test.sh'" if run_on else "scripts/dev/test.sh")
     v = {
@@ -125,6 +130,14 @@ def build_vars(ans, today):
         "RUN_PROFILE": ans.get("profile") or "", "RUN_IMAGE": ans.get("image") or f"{ans['slug']}-dev:latest",
         "CLEANUP_HOOK": "scripts/run/cleanup_hook.sh" if run_on else "",
         "RESTRICTED_PATTERNS": ", ".join(f"`{x}`" for x in restricted),
+        "RESTRICTED_YAML": yaml_inline(restricted),
+        "GIT_REMOTE": rem, "REF": f"{rem}/" if rem else "",
+        "PROTECTED_BRANCHES": ", ".join(prot),
+        "PUSH_INT_COMMON": f" && git push {rem} int/common" if rem else "",
+        "PUSH_RULE": (f"커밋한 뒤 자기 브랜치를 `git push {rem} HEAD:<브랜치>`로 올린다(Orca가 만든 로컬 브랜치 이름과 달라도 원격 이름은 규칙대로)."
+                      if rem else "**원격에 push하지 않는다**(이 저장소는 로컬 전용 운영이다). 커밋한 뒤 `git push . HEAD:<브랜치>`로 로컬 브랜치만 갱신한다. 워크트리끼리 같은 저장소를 공유한다."),
+        "PUSH_POLICY": ((f"브랜치는 `{rem}`에 올린다." + (f" 보호 브랜치({', '.join(prot)})로의 push는 마스터(사용자) 승인 뒤에만 한다(pre-push 훅이 `KIT_PUSH_OK=1` 없이 막는다)." if prot else ""))
+                        if rem else "로컬 전용 운영이다(`project.git_remote: \"\"`). 원격 push는 하지 않는다. 배포·공개는 사용자 결정으로 따로 한다(pre-push 훅이 막는다)."),
         "RESTRICTED_EXCLUDES": " ".join(shlex.quote(x if "/" in x or x.startswith("*") else f"/{x}") for x in restricted),
         "PROJECT_SUMMARY": ans.get("summary") or f"{ans['name']}을(를) 개발하는 저장소다. 모듈: "
         + ", ".join(f"{m['short']}({m['name']})" for m in mods) + ".",
@@ -176,7 +189,8 @@ def build_vars(ans, today):
         v["ENV_RULES"] = "\n".join(env)
         v["CONTAINER_NOTE"] = " 컨테이너에서 실행한다(`scripts/run/run.sh`, 워크트리별 격리). host network 금지."
     else:
-        v["ENV_RULES"] = "- 실행 격리 모듈을 쓰지 않는다. 빌드·시험은 정해진 스크립트로만 하고, 동시 실행이 포트·파일·DB를 공유하지 않게 시험마다 고유 자원을 쓴다."
+        v["ENV_RULES"] = ("- 실행 격리 모듈을 쓰지 않는다. 빌드·시험은 정해진 스크립트로만 하고, 동시 실행이 포트·파일·DB를 공유하지 않게 시험마다 고유 자원을 쓴다.\n"
+                          "  - 전체 시험은 워크트리 사이에서 동시 수를 제한한다: `orchestration/tools/slot.sh test -- <시험 명령>`(동시 전체 시험으로 메모리가 부족해 앱이 죽은 사례). 부분 시험은 그냥 돌린다.")
         v["CONTAINER_NOTE"] = ""
     return v
 
@@ -284,7 +298,7 @@ def load_answers(a):
     if a.answers:
         ans.update(yaml.safe_load(Path(a.answers).read_text(encoding="utf-8")) or {})
     for k in ("name", "slug", "review_preset", "remote", "profile", "build_cmd", "test_cmd", "image",
-              "restricted", "summary", "commit_email", "team_name", "main_branch"):
+              "restricted", "summary", "commit_email", "team_name", "main_branch", "git_remote", "protected"):
         val = getattr(a, k, None)
         if val is not None:
             ans[k] = val
@@ -352,6 +366,7 @@ def cmd_init(a):
         if not a.dry_run:
             gi.write_text(cur + ("\n" if cur and not cur.endswith("\n") else "") + block, encoding="utf-8")
     inst = {"kit_version": v["KIT_VERSION"], "installed": today.isoformat(), "kit_root_hint": "skills/orca-orchestration-kit",
+            "kit_commit": kit_commit(),
             "answers": {k: ans[k] for k in ans}, "files": record}
     print(f"  + {INSTALLED}")
     if not a.dry_run:
@@ -362,7 +377,8 @@ def cmd_init(a):
     print("\n다음 단계")
     print(f"  1) tasks.yaml W0 초안 검토: python3 {target}/orchestration/tools/validate_dag.py --repo {target}")
     print(f"  2) 커밋: git -C {target} add -A && git -C {target} commit -m '[L0] orchestration kit v{v['KIT_VERSION']} init'")
-    print(f"  3) Orca: kit.py bootstrap --target {target} --step master-run   (--dry-run으로 명령만 보기)")
+    print(f"  3) W0 브랜치: git -C {target} branch int/common {ans['main_branch']}" + (f" && git -C {target} push {v['GIT_REMOTE']} int/common" if v['GIT_REMOTE'] else ""))
+    print(f"  4) Orca: kit.py bootstrap --target {target} --step master-run   (--dry-run으로 명령만 보기)")
     if a.dry_run:
         print("\n(dry-run: 아무 파일도 쓰지 않았다)")
     return 0
@@ -399,56 +415,71 @@ def run_orca(args, dry):
 
 def cmd_bootstrap(a):
     target = Path(a.target).resolve()
-    sys.path.insert(0, str(target / "orchestration/tools"))
     cfg = yaml.safe_load((target / "orchestration/kit.yaml").read_text(encoding="utf-8"))
     orca = cfg.get("orca") or {}
     name = cfg["project"]["name"]
-    steps = ["master-run", "manager", "abandon", "dashboard"] if a.step == "all" else [a.step]
-    dry = a.dry_run
-    for st in steps:
-        print(f"\n[{st}]")
-        if st == "master-run":
-            if orca.get("master_run") and not a.force:
-                print(f"  이미 있음: {orca['master_run']} (--force로 새로)")
-                continue
-            out = run_orca(["orchestration", "run-create", "--objective", f"{name} 마스터 Run (사용자 소통·결정)", "--json"], dry)
-            rid = (re.findall(r"run_[0-9a-f]{6,}", out) or ["<master_run_id>"])[0]
-            set_kit_yaml(target, "master_run", rid, dry)
-            orca["master_run"] = rid
-        elif st == "manager":
-            mr = orca.get("master_run") or "<master_run_id>"
-            spec = (target / "orchestration/sessions/MANAGER.md").read_text(encoding="utf-8")
-            spec = spec.replace("{{MASTER_RUN}}", mr).replace("{{WORK_RUN}}", orca.get("work_run") or "")
-            gdir = Path(git(target, "rev-parse", "--absolute-git-dir") or target / ".git")
-            launch = gdir / "orca-kit" / "MANAGER.launch.md"     # git 밖(커밋되지 않음)
-            print(f"  명세: {launch} (MANAGER.md + Run ID)")
-            if not dry:
-                launch.parent.mkdir(parents=True, exist_ok=True)
-                launch.write_text(spec, encoding="utf-8")
-            out = run_orca(["orchestration", "worker-start", "--spec-file", str(launch), "--task-title", "작업관리 매니저",
-                            "--display-name", "매니저", "--agent", orca.get("agent") or "claude",
-                            "--worktree", f"path:{target}", "--json"], dry)
-            did = (re.findall(r"ctx_[0-9a-f]{6,}", out) or ["<manager_dispatch>"])[0]
-            set_kit_yaml(target, "manager_dispatch", did, dry)
-            orca["manager_dispatch"] = did
-            print("  → 턴을 끝내고 매니저의 '매니저 기동' 보고(run 메일함)를 기다린 뒤 --step abandon을 실행한다.")
-        elif st == "abandon":
-            did = a.dispatch or orca.get("manager_dispatch") or "<manager_dispatch>"
-            run_orca(["orchestration", "worker-abandon", "--dispatch", did, "--json"], dry)
-            if a.work_run:
-                set_kit_yaml(target, "work_run", a.work_run, dry)
-            print("  → 매니저는 이제 상시 세션이다. 보고·질문은 run:<마스터 Run>, 지시는 run:<작업 Run>으로 주고받는다.")
-        elif st == "dashboard":
-            port = str((cfg.get("dashboard") or {}).get("port") or 8765)
-            gdir = Path(git(target, "rev-parse", "--absolute-git-dir") or target / ".git")
-            log = gdir / "orca-kit" / "dashboard.log"
-            cmd = f"setsid nohup {target}/orchestration/tools/dashboard/serve.sh --orca -p {port} > {log} 2>&1 &"
-            print(f"  $ {cmd}")
-            print(f"  상시 기동은 systemd user 서비스: orchestration/tools/dashboard/systemd/ (README)")
-            if not dry:
-                log.parent.mkdir(parents=True, exist_ok=True)
-                subprocess.Popen(["bash", "-c", cmd], cwd=target, env={**os.environ, "ORCA_CLI_COMMAND": orca_cmd()})
-            print(f"  대시보드: http://127.0.0.1:{port}/")
+    dry, st = a.dry_run, a.step
+    gdir = Path(git(target, "rev-parse", "--git-common-dir") or ".git")
+    gdir = gdir if gdir.is_absolute() else (target / gdir).resolve()
+    print(f"\n[{st}]")
+    if st == "master-run":
+        if orca.get("master_run") and not a.force:
+            print(f"  이미 있음: {orca['master_run']} (새 마스터 세션이면 --step attach, 새 Run이 필요하면 --force)")
+            return 0
+        out = run_orca(["orchestration", "run-create", "--objective", f"{name} 마스터 Run (사용자 소통·결정)", "--json"], dry)
+        rid = (re.findall(r"run_[0-9a-f]{6,}", out) or ["<master_run_id>"])[0]
+        set_kit_yaml(target, "master_run", rid, dry)
+    elif st == "attach":
+        mr = orca.get("master_run")
+        if not mr:
+            raise SystemExit("kit.yaml orca.master_run이 없다. 처음이면 --step master-run")
+        run_orca(["orchestration", "run-use", "--id", mr, "--json"], dry)
+        print(f"  → 이 세션이 마스터 Run {mr}의 메일을 받는다. 이전 마스터 세션이 살아 있으면 닫는다.")
+        print(f"  → 놓친 메일: {orca_cmd()} orchestration inbox --terminal run:{mr} --limit 50 · 현황: python3 orchestration/tools/status.py")
+    elif st == "manager":
+        mr = orca.get("master_run")
+        if not mr and not dry:
+            raise SystemExit("orca.master_run이 없다. 먼저 --step master-run")
+        spec = (target / "orchestration/sessions/MANAGER.md").read_text(encoding="utf-8")
+        local = target / "orchestration/sessions/MANAGER.local.md"
+        if local.is_file():
+            spec = spec.rstrip() + "\n\n## 프로젝트 덧붙임 (MANAGER.local.md)\n\n" + local.read_text(encoding="utf-8")
+        spec = spec.replace("{{MASTER_RUN}}", mr or "<master_run_id>").replace("{{WORK_RUN}}", orca.get("work_run") or "")
+        launch = gdir / "orca-kit" / "MANAGER.launch.md"     # git 밖(커밋되지 않음)
+        print(f"  명세: {launch} (MANAGER.md{' + MANAGER.local.md' if local.is_file() else ''} + Run ID)")
+        if not dry:
+            launch.parent.mkdir(parents=True, exist_ok=True)
+            launch.write_text(spec, encoding="utf-8")
+        # 기존 워크트리(path:)에는 --name·--display-name 같은 생성 플래그를 주면 Orca가 거부한다
+        out = run_orca(["orchestration", "worker-start", "--spec-file", str(launch), "--task-title", "작업관리 매니저",
+                        "--agent", orca.get("agent") or "claude", "--worktree", f"path:{target}", "--json"], dry)
+        did = (re.findall(r"ctx_[0-9a-f]{6,}", out) or ["<manager_dispatch>"])[0]
+        set_kit_yaml(target, "manager_dispatch", did, dry)
+        print("  → 턴을 끝내고 매니저의 '매니저 기동' 보고(마스터 Run 메일함)를 기다린 뒤 --step abandon --work-run <보고된 Run>.")
+    elif st == "abandon":
+        if not a.work_run and not dry:
+            raise SystemExit("--work-run <매니저가 '매니저 기동'에 적은 작업 Run>이 필요하다. 기동 보고를 받기 전에는 abandon하지 않는다")
+        did = a.dispatch or orca.get("manager_dispatch") or "<manager_dispatch>"
+        run_orca(["orchestration", "worker-abandon", "--dispatch", did, "--json"], dry)
+        set_kit_yaml(target, "work_run", a.work_run or "<work_run>", dry)
+        print("  → 매니저는 이제 상시 세션이다. 보고·질문은 run:<마스터 Run>, 지시는 run:<작업 Run>. kit.yaml 커밋은 매니저에게 지시한다.")
+    elif st == "hooks":
+        cmd = [str(target / "orchestration/tools/install_hooks.sh")] + (["--dry-run"] if dry else []) + (["--force"] if a.force else [])
+        print("  $ " + " ".join(cmd))
+        p = subprocess.run(cmd, cwd=target, capture_output=True, text=True)
+        print("  " + (p.stdout + p.stderr).strip().replace("\n", "\n  "))
+        if p.returncode:
+            return p.returncode
+    elif st == "dashboard":
+        port = str((cfg.get("dashboard") or {}).get("port") or 8765)
+        log = gdir / "orca-kit" / "dashboard.log"
+        cmd = f"setsid nohup {shlex.quote(str(target))}/orchestration/tools/dashboard/serve.sh --orca -p {port} > {shlex.quote(str(log))} 2>&1 &"
+        print(f"  $ {cmd}")
+        print("  상시 기동은 systemd user 서비스: orchestration/tools/dashboard/systemd/ (README)")
+        if not dry:
+            log.parent.mkdir(parents=True, exist_ok=True)
+            subprocess.Popen(["bash", "-c", cmd], cwd=target, env={**os.environ, "ORCA_CLI_COMMAND": orca_cmd()})
+        print(f"  대시보드: http://127.0.0.1:{port}/")
     if dry:
         print("\n(dry-run: Orca 명령을 실행하지 않았고 kit.yaml도 바꾸지 않았다)")
     return 0
@@ -456,51 +487,61 @@ def cmd_bootstrap(a):
 
 # ─────────────────────────── status ───────────────────────────
 
-def try_json(args):
-    p = subprocess.run([orca_cmd(), *args, "--json"], capture_output=True, text=True)
-    try:
-        return json.loads(p.stdout or "{}")
-    except json.JSONDecodeError:
-        return {"ok": False, "error": {"message": (p.stderr or p.stdout).strip()[:200]}}
-
-
 def cmd_status(a):
+    """설치된 프로젝트의 현황·정지 점검. 본체는 키트의 tools/status.py(항상 최신)다."""
     target = Path(a.target).resolve()
-    cfg = yaml.safe_load((target / "orchestration/kit.yaml").read_text(encoding="utf-8"))
-    orca = cfg.get("orca") or {}
-    print(f"# {cfg['project']['name']} 현황 ({dt.datetime.now():%Y-%m-%d %H:%M})")
-    v = subprocess.run([sys.executable, str(target / "orchestration/tools/validate_dag.py"), "--repo", str(target)],
-                       capture_output=True, text=True)
-    print("\n## 작업 DAG\n" + v.stdout.rstrip())
-    if a.no_orca:
-        return 0
-    if orca.get("master_run"):
-        mb = try_json(["orchestration", "inbox", "--terminal", f"run:{orca['master_run']}", "--limit", str(a.limit)])
-        msgs = (mb.get("result") or {}).get("messages") or []
-        print(f"\n## 마스터 메일함 (최근 {len(msgs)})")
-        for m in msgs[:a.limit]:
-            print(f"- [{m.get('type', '?')}] {m.get('subject', '')} — {str(m.get('body', ''))[:120]}")
-        if not mb.get("ok", True):
-            print(f"  (조회 실패: {(mb.get('error') or {}).get('message')})")
-    if orca.get("work_run"):
-        tl = try_json(["orchestration", "task-list", "--run", orca["work_run"]])
-        ts = (tl.get("result") or {}).get("tasks") or []
-        cnt = {}
-        for t in ts:
-            cnt[t.get("status")] = cnt.get(t.get("status"), 0) + 1
-        print(f"\n## Orca 작업 (Run {orca['work_run']}): " + (", ".join(f"{k} {n}" for k, n in cnt.items()) or "없음"))
-        wl = try_json(["orchestration", "worker-list", "--run", orca["work_run"]])
-        ws = (wl.get("result") or {}).get("workers") or []
-        live = [w for w in ws if w.get("state") not in ("succeeded", "failed")]
-        print(f"## 워커: 전체 {len(ws)} · 진행 {len(live)}")
-        for w in live[:20]:
-            print(f"- {w.get('displayName') or w.get('dispatchId')} {w.get('state')}")
-    else:
-        print("\n(orca.work_run 미설정: 매니저 기동 보고 후 bootstrap --step abandon --work-run <id>)")
-    return 0
+    args = [sys.executable, str(KIT_ROOT / "tools/status.py"), "--repo", str(target), "--limit", str(a.limit)]
+    args += (["--stall"] if a.stall else []) + (["--warnings"] if a.warnings else []) + (["--no-orca"] if a.no_orca else [])
+    rc = subprocess.run(args).returncode
+    ip = target / INSTALLED
+    if ip.is_file():
+        iv = json.loads(ip.read_text(encoding="utf-8")).get("kit_version")
+        if iv and iv != kit_version():
+            print(f"\n## 키트: 설치본 v{iv} · 키트 v{kit_version()} → 'kit.py upgrade --target {target}'로 diff를 보고 반영을 권한다")
+    return rc
 
 
 # ─────────────────────────── upgrade ───────────────────────────
+
+def kit_commit():
+    c = git(KIT_ROOT, "rev-parse", "HEAD")
+    dirty = git(KIT_ROOT, "status", "--porcelain", "--untracked-files=no")
+    return f"{c}{'+dirty' if dirty else ''}" if c else None
+
+
+def base_text(e, v, want_sha, hint):
+    """설치(또는 마지막 반영) 당시 키트가 렌더링한 원본을 키트 git 이력에서 되살린다. sha가 맞을 때만 쓴다."""
+    if not e.get("src"):            # kit.py가 생성한 파일(tasks.yaml 초안)은 원본이 없다
+        return None
+    commits = []
+    if hint:
+        commits.append(hint.split("+")[0])
+    log = git(KIT_ROOT, "log", "--format=%H", "-n", "300", "--", e["src"]) or ""
+    commits += [c for c in log.split() if c not in commits]
+    for c in commits:
+        old = git(KIT_ROOT, "show", f"{c}:{e['src']}")
+        if old is None:
+            continue
+        text = render(old + "\n", v, keep=set(e.get("keep") or []))[0] if e.get("render") else old + "\n"
+        for cand in (text, text[:-1]):   # git show는 끝 줄바꿈을 뗀다
+            if sha(cand) == want_sha:
+                return cand
+    return None
+
+
+def merge3(cur, base, new):
+    """git merge-file로 3방향 병합. (병합 결과, 충돌 수)."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        paths = []
+        for n, t in (("cur", cur), ("base", base), ("new", new)):
+            q = Path(d) / n
+            q.write_text(t, encoding="utf-8")
+            paths.append(str(q))
+        p = subprocess.run(["git", "merge-file", "-p", "-L", "현재(프로젝트)", "-L", "설치 당시 키트", "-L", "새 키트", *paths],
+                           capture_output=True, text=True)
+    return p.stdout, p.returncode
+
 
 def cmd_upgrade(a):
     target = Path(a.target).resolve()
@@ -510,9 +551,17 @@ def cmd_upgrade(a):
     inst = json.loads(ip.read_text(encoding="utf-8"))
     ans = inst["answers"]
     cfg = yaml.safe_load((target / "orchestration/kit.yaml").read_text(encoding="utf-8"))
-    # kit.yaml이 정본: 사용자가 바꾼 값(이름·모듈·메인 브랜치)을 반영한다
-    ans["name"] = cfg["project"].get("name", ans["name"])
-    ans["main_branch"] = cfg["project"].get("main_branch", ans.get("main_branch"))
+    # kit.yaml이 정본: 사용자가 바꾼 값(이름·모듈·메인 브랜치·원격)을 반영한다
+    proj = cfg.get("project") or {}
+    ans["name"] = proj.get("name", ans["name"])
+    ans["main_branch"] = proj.get("main_branch", ans.get("main_branch"))
+    if "git_remote" in proj:
+        ans["git_remote"] = proj.get("git_remote") or ""
+    elif "git_remote" not in ans:
+        print("참고: kit.yaml에 project.git_remote가 없어 기본값 origin으로 렌더링한다. 로컬 전용(원격 push 금지)으로 운영해 왔다면 "
+              "먼저 kit.yaml project에 git_remote: \"\"를 넣고 다시 미리보기한다(push 문구 충돌이 줄어든다).")
+    if proj.get("protected_branches"):
+        ans["protected"] = proj["protected_branches"]
     ans["modules"] = [m for m in cfg.get("modules") or ans["modules"] if m.get("key") not in ("common", "system")]
     v = build_vars(ans, dt.date.fromisoformat(inst["installed"]))
     files, man, _ = plan_files(ans, v)
@@ -525,49 +574,61 @@ def cmd_upgrade(a):
         kind = e.get("kind")
         if cur is not None and sha(cur) == sha(new):
             continue
+        merged = None
         if cur is None:
             state = "삭제됨(사용자)" if dst in base else "새 파일"
         elif dst not in base:
             state = "키트 밖 파일과 겹침"
         elif sha(cur) == base[dst]:
             state = "키트 갱신"
+        elif sha(new) == base[dst]:
+            continue                                   # 사용자 수정, 키트 변경 없음
         else:
-            state = "충돌(사용자 수정 + 키트 변경)" if sha(new) != base[dst] else "사용자 수정(키트 변경 없음)"
-        if state == "사용자 수정(키트 변경 없음)":
-            continue
-        if kind == "seed" and state != "새 파일" and not a.include_seed:
-            changes.append((dst, state + " · seed(프로젝트 소유) — --include-seed로 보기", None, None, e))
-            continue
-        changes.append((dst, state, cur, new, e))
+            state = "충돌(사용자 수정 + 키트 변경)"
+            bt = base_text(e, v, base[dst], inst.get("kit_commit"))
+            if bt is not None:
+                merged, nconf = merge3(cur, bt, new)
+                state = "자동 병합(사용자 수정 + 키트 변경, 겹침 없음)" if nconf == 0 else f"충돌 {nconf}곳(병합 표시를 넣은 .kit-new)"
+        if kind == "seed" and state != "새 파일":
+            if not a.include_seed:
+                changes.append((dst, state + " · seed(프로젝트 소유) — --include-seed로 diff 보기", None, None, None, e))
+                continue
+            state += " · seed(프로젝트 소유): 적용하면 .kit-new로만 쓴다"
+        changes.append((dst, state, cur, new, merged, e))
     if not changes:
         print("변경 없음")
         return 0
-    for dst, state, cur, new, e in changes:
+    for dst, state, cur, new, merged, e in changes:
         print(f"\n=== {dst}: {state}")
         if new is not None and not a.summary:
-            diff = difflib.unified_diff((cur or "").splitlines(True), new.splitlines(True),
-                                        fromfile=f"현재/{dst}", tofile=f"키트 v{v['KIT_VERSION']}/{dst}")
+            show = merged if merged is not None and state.startswith("자동 병합") else new
+            diff = difflib.unified_diff((cur or "").splitlines(True), show.splitlines(True),
+                                        fromfile=f"현재/{dst}", tofile=f"적용 후/{dst}")
             sys.stdout.writelines(diff)
     if not a.apply:
-        print("\n(미리보기: 적용하려면 사용자 확인 뒤 --apply. 충돌 파일은 <파일>.kit-new로 쓴다. 덮어쓰려면 --overwrite-conflicts)")
+        print("\n(미리보기: 적용하려면 사용자 확인 뒤 --apply. 자동 병합은 그대로 쓰고, 충돌·키트 밖 파일·seed는 <파일>.kit-new로 쓴다."
+              " 키트 판으로 덮어쓰려면 --overwrite-conflicts)")
         return 0
-    for dst, state, cur, new, e in changes:
-        if new is None or state == "삭제됨(사용자)":
+    for dst, state, cur, new, merged, e in changes:
+        if new is None or state.startswith("삭제됨"):
             continue
         p = target / dst
-        if state.startswith("충돌") and not a.overwrite_conflicts:
-            p.with_name(p.name + ".kit-new").write_text(new, encoding="utf-8")
+        p.parent.mkdir(parents=True, exist_ok=True)
+        side = state.startswith(("충돌", "키트 밖")) or "seed(" in state
+        if side and not (a.overwrite_conflicts and "seed(" not in state):
+            text = merged if merged is not None and state.startswith("충돌") else new
+            p.with_name(p.name + ".kit-new").write_text(text, encoding="utf-8")
             print(f"  ! {dst}.kit-new (직접 합친 뒤 지운다)")
             continue
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(new, encoding="utf-8")
+        p.write_text(merged if state.startswith("자동 병합") else new, encoding="utf-8")
         if e.get("mode"):
             os.chmod(p, int(str(e["mode"]), 8))
         base[dst] = sha(new)
-        print(f"  ~ {dst}")
+        print(f"  ~ {dst}" + ("  (자동 병합)" if state.startswith("자동 병합") else ""))
     inst["files"], inst["kit_version"] = base, v["KIT_VERSION"]
+    inst["kit_commit"] = kit_commit()
     ip.write_text(json.dumps(inst, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(f"적용 완료. 커밋: git -C {target} commit -am '[L0] orchestration kit v{v['KIT_VERSION']} upgrade'")
+    print(f"적용 완료. .kit-new가 있으면 합친 뒤 지우고, 매니저에게 커밋을 지시한다: '[L0] orchestration kit v{v['KIT_VERSION']} upgrade'")
     return 0
 
 
@@ -589,20 +650,25 @@ def main(argv=None):
     pi.add_argument("--image"), pi.add_argument("--restricted", help="배포 제한 파일 패턴 (쉼표). 기본 '*.pdf,.orca/'")
     pi.add_argument("--summary"), pi.add_argument("--commit-email", dest="commit_email")
     pi.add_argument("--team-name", dest="team_name"), pi.add_argument("--main-branch", dest="main_branch")
+    pi.add_argument("--git-remote", dest="git_remote",
+                    help="브랜치를 올릴 git 원격 (기본 origin). 빈 값('')이면 로컬 전용 운영(원격 push가 배포를 일으키는 저장소)")
+    pi.add_argument("--protected", help="원격 push에 승인이 필요한 브랜치 (쉼표, 예: main)")
     pi.add_argument("--date", help="설치일 YYYY-MM-DD (기본 오늘)")
     pi.add_argument("--force", action="store_true"), pi.add_argument("--dry-run", action="store_true")
     pb = sub.add_parser("bootstrap", help="Orca 단계 실행")
     pb.add_argument("--target", default=".")
-    pb.add_argument("--step", default="all", choices=["all", "master-run", "manager", "abandon", "dashboard"])
+    pb.add_argument("--step", required=True, choices=["master-run", "manager", "abandon", "attach", "hooks", "dashboard"],
+                    help="한 단계씩 실행한다. manager 뒤에는 매니저 기동 보고를 받은 다음 abandon")
     pb.add_argument("--dispatch", help="abandon 대상 dispatch (기본 kit.yaml orca.manager_dispatch)")
     pb.add_argument("--work-run", dest="work_run", help="매니저가 보고한 작업 Run ID (abandon 때 kit.yaml에 기록)")
     pb.add_argument("--force", action="store_true"), pb.add_argument("--dry-run", action="store_true")
     ps = sub.add_parser("status", help="현황 요약")
     ps.add_argument("--target", default="."), ps.add_argument("--limit", type=int, default=10)
-    ps.add_argument("--no-orca", action="store_true")
+    ps.add_argument("--no-orca", action="store_true"), ps.add_argument("--stall", action="store_true", help="정지 점검만")
+    ps.add_argument("--warnings", action="store_true", help="DAG 경고 목록")
     pu = sub.add_parser("upgrade", help="키트 새 버전 반영 (diff → 확인 → --apply)")
     pu.add_argument("--target", default=".")
-    pu.add_argument("--apply", action="store_true"), pu.add_argument("--include-seed", action="store_true")
+    pu.add_argument("--apply", action="store_true"), pu.add_argument("--include-seed", action="store_true", help="seed 파일 diff도 본다(적용은 .kit-new로만)")
     pu.add_argument("--overwrite-conflicts", action="store_true"), pu.add_argument("--summary", action="store_true",
                                                                                    help="diff 없이 목록만")
     a = ap.parse_args(argv)

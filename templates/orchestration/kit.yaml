@@ -9,6 +9,11 @@ project:
   commit_email: "{{COMMIT_EMAIL}}"   # 공용 주소. 개인 이메일 금지(확인 훅이 자율 실행을 멈춘다)
   build_cmd: "{{BUILD_CMD}}"
   test_cmd: "{{TEST_CMD}}"
+  # 브랜치를 올릴 git 원격. 빈 값("")이면 로컬 전용 운영: 워커는 `git push . HEAD:<브랜치>`로 로컬 브랜치만 갱신하고,
+  # pre-push 훅(install_hooks.sh)이 원격 push를 막는다. 원격 push가 배포를 일으키는 저장소에 쓴다.
+  git_remote: "{{GIT_REMOTE}}"
+  protected_branches: [{{PROTECTED_BRANCHES}}]   # 원격 push에 승인(KIT_PUSH_OK=1)이 필요한 브랜치 (pre-push 훅)
+  restricted: {{RESTRICTED_YAML}}   # 배포 제한 파일 패턴 (pre-push 훅·run.sh 제외 목록)
 
 # 모듈 = int/<key> 통합 브랜치 = L1 통합 세션 1개. common·system은 예약어(공통 기반·체계 통합)
 modules:
@@ -24,6 +29,7 @@ gates: [G-0]
 
 paths:
   tasks: orchestration/tasks.yaml
+  tasks_archive: orchestration/tasks.archive.yaml   # archive_tasks.py가 옮긴 merged 작업 (도구가 함께 읽는다)
   specs: orchestration/specs
   templates: orchestration/templates
   docs: docs
@@ -38,6 +44,17 @@ paths:
 spec_templates:
   L1: integration-spec.md
   default: worker-spec.md
+
+# 구현 검토 워커 기본값 (launch.sh --review). 비우면 작업의 agent 또는 orca.agent.
+# 구현과 다른 제공자 모델로 검토하면 같은 맹점을 덜 공유한다(예: Claude 구현 → codex 검토).
+review:
+  agent: ""
+  model: ""
+  effort: ""
+
+# 워크트리 사이 동시 실행 슬롯 (orchestration/tools/slot.sh <이름> -- <명령>)
+slots:
+  test: 1
 
 # 명세 문구
 spec_text:

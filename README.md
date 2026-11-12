@@ -8,7 +8,7 @@ AI 에이전트 다중 세션으로 소프트웨어를 개발하는 워크플로
 - 브랜치·머지 규약, 쓰기 범위 소유권, 번호 문서 체계, 요구사항 추적(RTM)·TBD·증적, 과정 기록 3종
 - 단일 HTML 대시보드(오프라인), 실행 격리 모듈(선택), 검토 단계 모듈(선택)
 
-버전: **v0.2.0** (2026-11-09)
+버전: **v0.3.0** (2026-11-12)
 
 ---
 
@@ -66,25 +66,37 @@ Claude Code(마스터가 될 세션)에서: **"새 프로젝트를 오케스트�
 K=skills/orca-orchestration-kit/scripts/kit.py
 python3 $K init --target ~/src/my-app --name "내 앱" --slug myapp \
     --modules "api:API 서버:API,web:웹 UI:WEB" --review-preset none --run --dry-run   # 계획만
+    # 원격 push가 배포를 일으키는 저장소: --git-remote ''(로컬 전용) 또는 --protected main(승인 필요 브랜치)
 python3 $K init --target ~/src/my-app ...                                      # 설치
 python3 ~/src/my-app/orchestration/tools/validate_dag.py --repo ~/src/my-app    # W0 초안 검증
+git -C ~/src/my-app branch int/common main                       # W0 브랜치 (커밋 뒤)
+python3 $K bootstrap --target ~/src/my-app --step hooks          # pre-push 훅(로컬 전용·보호 브랜치·배포 제한 파일)
 python3 $K bootstrap --target ~/src/my-app --step master-run     # 마스터 Run
 python3 $K bootstrap --target ~/src/my-app --step manager        # 매니저 워커 → 기동 보고를 기다린다
 python3 $K bootstrap --target ~/src/my-app --step abandon --work-run <매니저 Run>   # 메일함 운영으로 전환
 python3 $K bootstrap --target ~/src/my-app --step dashboard      # http://127.0.0.1:8765/
-python3 $K status  --target ~/src/my-app                         # 메일함·작업·워커 요약
-python3 $K upgrade --target ~/src/my-app [--apply]               # 키트 새 버전 반영(diff → 확인 → 적용)
+python3 $K bootstrap --target ~/src/my-app --step attach         # 새 마스터 세션이 기존 마스터 Run을 이어받을 때
+python3 $K status  --target ~/src/my-app [--stall]               # 현황·정지 점검·메일함 미처리(메시지 ID)
+python3 $K upgrade --target ~/src/my-app [--apply]               # 키트 새 버전 반영(diff → 확인 → 적용, 3방향 병합)
 ```
+`bootstrap`은 한 번에 한 단계다(`--step` 필수). 매니저 기동 보고를 받기 전에는 abandon하지 않는다.
 `bootstrap`에 `--dry-run`을 붙이면 Orca 명령을 실행하지 않고 출력만 한다.
 
 ### 2.3 설치 후 일상 운영 (매니저)
 ```bash
+python3 orchestration/tools/status.py [--stall]          # 현황·투입 가능·메일함 미처리·정지 점검 (깨어날 때·대기 전)
 python3 orchestration/tools/validate_dag.py              # DAG 수정 후 항상
-python3 orchestration/tools/render_spec.py --list-ready  # 투입 가능한 L2
-orchestration/tools/launch.sh R-API-001 R-WEB-001        # 렌더링 → task-create → worker-start → status running
+orchestration/tools/launch.sh R-API-001 R-WEB-001        # 선행·status·기준 브랜치 확인 → 렌더링 → task-create → worker-start → running
+orchestration/tools/launch.sh --review R-API-001         # 구현 검토(보고서 브랜치 req/R-API-001-RV, 메인 기준)
+orchestration/tools/launch.sh --retry 지적.md --suffix r1 R-API-001   # 남은 지적 재투입(req/R-API-001에서)
+python3 orchestration/tools/archive_tasks.py             # merged 작업을 tasks.archive.yaml로 (tasks.yaml을 작게)
+orchestration/tools/sync_main.sh [--all] [--push]        # int/common → main (체크아웃을 바꾸지 않음, 원격은 --push일 때만)
 orchestration/tools/cleanup_worker.sh r-api-001 req/R-API-001 int/api   # 머지 직후 정리(4조건)
+orchestration/tools/slot.sh test -- npm test             # 워크트리 사이 전체 시험 동시 수 제한
+python3 orchestration/tools/evidence_lint.py             # 증적 위생(환경 변수 덤프·홈 경로·이메일·비밀값)
 orchestration/tools/dashboard/serve.sh --orca            # 대시보드
 ```
+키트 시험: `tests/smoke.sh` (임시 폴더, Orca 불필요).
 
 ---
 
@@ -92,8 +104,9 @@ orchestration/tools/dashboard/serve.sh --orca            # 대시보드
 
 | 모듈 | 키트 경로 | 설치 위치 | 내용 |
 |---|---|---|---|
-| 세션 체계 | `templates/sessions/` | `orchestration/sessions/`, `orchestration/templates/` | `MASTER.md`, `MANAGER.md`(관문·검토·대기 절차 포함), `worker-spec.md`(L2), `integration-spec.md`(L1), `review-spec.md`(검토 작업, 작업별 `spec_template`) |
-| 작업 DAG | `templates/orchestration/tasks.yaml`, `tools/` | `orchestration/` | 스키마 주석·일반 예시, `validate_dag.py`(중복 ID·없는 deps·순환·중복 키·쓰기 범위 겹침), `render_spec.py`, `launch.sh`, `task_status.py`, `cleanup_worker.sh`(4조건), `sync_main.sh` |
+| 세션 체계 | `templates/sessions/` | `orchestration/sessions/`, `orchestration/templates/` | `MASTER.md`, `MANAGER.md`(상시 핵심), `procedures/merge-gate.md`·`review.md`(필요할 때 읽는 절차), `worker-spec.md`(L2), `integration-spec.md`(L1), `review-spec.md`(검토). 프로젝트 규칙은 `*.local.md` 덧붙임 |
+| 작업 DAG | `templates/orchestration/tasks.yaml`, `tools/` | `orchestration/` | 스키마 주석(`hold`·`agent/model/effort` 포함), `validate_dag.py`, `render_spec.py`(`--review`·`--retry`), `launch.sh`(=`launch.py`), `status.py`(정지 점검), `archive_tasks.py`, `task_status.py`, `cleanup_worker.sh`(4조건), `sync_main.sh` |
+| 운영 보호 | `tools/` | `orchestration/tools/` | `slot.sh`(동시 실행 슬롯), `evidence_lint.py`(증적 위생), `hooks/pre-push` + `install_hooks.sh`(로컬 전용·보호 브랜치·배포 제한 파일) |
 | 구조·규약 | `templates/orchestration/README.md` | `orchestration/README.md` | 계층, 브랜치·머지, 웨이브, 쓰기 범위 소유권 표, 동시 실행, 완료 기준, 소통, 종료 정리 |
 | 공통 규칙 | `templates/AGENTS.md`, `CLAUDE.md` | 저장소 루트 | 개인 이메일 금지, 배포 제한 파일 금지, 컨테이너 빌드, 쓰기 범위 밖은 ask |
 | 문서 체계 | `templates/docs/` | `docs/` | 번호 폴더, 파일명·개정이력·보관 사본 규칙, RTM, TBD 관리대장, 증적 양식, 과정 기록 3종(프로세스·지표 / 의사결정 / 운영 이슈·교훈) |
@@ -101,11 +114,11 @@ orchestration/tools/dashboard/serve.sh --orca            # 대시보드
 | 대시보드 | `tools/dashboard/` | `orchestration/tools/dashboard/` | 설정 기반 단일 HTML 생성기, `serve.sh`, `snapshot.sh`, systemd user 서비스 예시, `tailscale serve` 사설망 공개 절차 |
 | 실행 격리 (선택) | `tools/run/` | `scripts/run/` | 워크트리별 컨테이너 + 전용 네트워크, 격리 변수 훅, 원격 실행(rsync → 원격 컨테이너 → 결과 회수, 배포 제한 패턴 제외), GPU 지정, HEAVY 슬롯(flock), 지표 수집 |
 | ROS 2 프로필 (선택) | `tools/run/profiles/ros2/` | `scripts/run/profiles/ros2/` | `ROS_DOMAIN_ID`·`GZ_PARTITION` 격리, setup 자동 source, colcon test 순차 |
-| 스킬 | `skills/orca-orchestration-kit/` | 사용자 스킬 경로(링크) | `SKILL.md`(init·status·upgrade 흐름), `scripts/kit.py` |
+| 스킬 | `skills/orca-orchestration-kit/` | 사용자 스킬 경로(링크) | `SKILL.md`(흐름 고르기·status·이어받기), `references/init.md`·`upgrade.md`, `scripts/kit.py` |
 | 예제 | `examples/demo-project/` | - | 가상 "할 일 관리 웹앱"(모듈 2, 작업 6 + 게이트 1)에 적용한 결과: tasks.yaml, 렌더링된 명세 3개, 대시보드 |
 
 파일 배치의 정본은 [`kit-manifest.yaml`](kit-manifest.yaml)이다. `managed`는 키트 소유(upgrade 대상), `seed`는 한 번 깔고 프로젝트 소유다.
-프로젝트별 값은 모두 `orchestration/kit.yaml` 한 곳에 있다(모듈, 웨이브, 경로, 검증 단계, 검토 단계, Orca Run ID, 실행 격리, 대시보드).
+프로젝트별 값은 모두 `orchestration/kit.yaml` 한 곳에 있다(모듈, 웨이브, 경로, git 원격·보호 브랜치·배포 제한 패턴, 검증 단계, 검토 단계·검토 모델, 슬롯, Orca Run ID, 실행 격리, 대시보드).
 
 연계(선택): 요구사항 세션 안에서 `claude-codex-workflow` 플러그인(Claude 기획 → Codex 구현 → Claude 검수)을 쓸 수 있다. 의존성은 아니다(SKILL.md '연계').
 
@@ -148,6 +161,12 @@ orchestration/tools/dashboard/serve.sh --orca            # 대시보드
 - **큰 구현은 세션당 4묶음 안팎으로 쪼갠다.** 문맥이 모자라면 부분 완료 + 남은 목록으로 끝낸다.
 - **무인 셸 명령:** `pgrep -f` 패턴은 자기 명령줄과 맞는다(pid로 기다린다). 변수 경로 rm은 `"${VAR:?}"`로 쓴다(훅 프롬프트에 멈추지 않게).
 
+**효율·보호 (v0.3, L-14 ~ L-19, 두 번째 실사용 프로젝트)**
+- **세션이 매번 읽는 문서를 작게 둔다.** 워커는 명세와 AGENTS.md만 읽는다. merged 작업은 보관 파일로 옮긴다(103KB → 8KB 실측). 절차는 필요할 때 여는 파일로.
+- **전체 시험은 슬롯으로 제한한다.** 워크트리마다 동시에 돌리면 메모리가 부족해 IDE까지 죽는다.
+- **원격 push가 배포를 일으키는 저장소는 로컬 전용으로 운영한다.** 명세가 `git push . HEAD:<브랜치>`를 쓰고 pre-push 훅이 막는다. 메시지 본문은 작은따옴표로(백틱이 실행된다).
+- **증적에 환경 변수·홈 경로를 남기지 않는다.** 보고 전 `evidence_lint.py`.
+
 ---
 
 ## 5. 저장소 구조
@@ -155,14 +174,16 @@ orchestration/tools/dashboard/serve.sh --orca            # 대시보드
 README.md  install.sh  kit-manifest.yaml  VERSION
 templates/
   AGENTS.md  CLAUDE.md
-  sessions/       MASTER.md  MANAGER.md  worker-spec.md  integration-spec.md  review-spec.md
+  sessions/       MASTER.md  MANAGER.md  procedures/{merge-gate,review}.md  worker-spec.md  integration-spec.md  review-spec.md
   orchestration/  README.md  tasks.yaml  kit.yaml  state/  templates/{evidence.md, blocks/*.md}
   docs/           README.md  requirements/  evidence/  process/  review-stages/
 tools/
-  kitlib.py kitcfg.py validate_dag.py render_spec.py task_status.py launch.sh cleanup_worker.sh sync_main.sh
+  kitlib.py kitcfg.py validate_dag.py render_spec.py task_status.py launch.sh launch.py status.py archive_tasks.py
+  cleanup_worker.sh sync_main.sh slot.sh evidence_lint.py install_hooks.sh hooks/pre-push
   dashboard/      build.py serve.sh snapshot.sh dashboard.example.yaml README.md systemd/
   run/            run.sh run.conf.example cleanup_hook.sh metrics.sh README.md profiles/ros2/
-skills/orca-orchestration-kit/   SKILL.md  scripts/kit.py
+skills/orca-orchestration-kit/   SKILL.md  references/{init,upgrade}.md  scripts/kit.py
+tests/                           smoke.sh (키트 회귀 시험)
 examples/demo-project/           answers.yaml tasks·RTM·TBD·증적, specs/, dashboard/index.html, make_demo.sh
 docs/                            VERIFY.md  DESIGN-NOTES.md  LESSONS.md
 ```
@@ -173,6 +194,7 @@ docs/                            VERIFY.md  DESIGN-NOTES.md  LESSONS.md
 
 | 버전 | 일자 | 내용 |
 |---|---|---|
+| v0.3.0 | 2026-11-12 | 효율 검토 반영(`docs/DESIGN-NOTES.md` 4장, 교훈 L-14 ~ L-19). **결함:** upgrade가 키트 밖 파일을 덮어쓰던 것(→ `.kit-new`), status·cleanup의 진행 워커 오판·100개 잘림, launch가 선행·status를 안 보던 것, bootstrap `all`이 기동 보고 전에 abandon하던 것, 매니저 기동에 기존 워크트리 생성 플래그(`--display-name`), sync_main의 체크아웃 전환·자동 push. **효율:** 워커 고정 읽기 축소(AGENTS '읽을 것'), merged 보관(`archive_tasks.py`), MANAGER 분할(`procedures/`), SKILL 분할(`references/`), 정지 점검 도구(`status.py`, `hold`), 작업별 `agent/model/effort`, `launch.sh --review/--retry`, `slot.sh`, `evidence_lint.py`, pre-push 훅, 로컬 전용 운영(`project.git_remote`), 덧붙임 파일(`*.local.md`), upgrade 3방향 자동 병합·새 버전 알림, 회귀 시험 `tests/smoke.sh`. **기존 설치본:** `upgrade` 미리보기 → 로컬 전용이었으면 kit.yaml에 `git_remote: ""`부터 넣는다(`references/upgrade.md`). 검증: `docs/VERIFY.md` 8장 |
 | v0.2.0 | 2026-11-09 | 실전 프로젝트 후반 교훈 13건 반영(`docs/LESSONS.md` L-01 ~ L-13, 근거 `docs/DESIGN-NOTES.md` 3장). MANAGER.md에 main 머지 관문(범위 확인·체크아웃 분리·유효 회차·미추적 증적)·검토 작업·대기와 정지 점검 장 추가, 후속 작업·실행 중 send·수정/기능 분리·작업 크기 규칙. 검토 명세 `review-spec.md` 신설(기준 브랜치·읽기 전용 대상·실행 재현 H), `render_spec.py`가 작업별 `spec_template`·`{target}`을 읽음. worker-spec에 범위·부분 완료, AGENTS에 '셸 명령'(pid 대기, `${VAR:?}`), integration-spec·sim 블록에 관문 유효성, MASTER에 정지 점검·범위 축소 선택지, 구조 문서 완료 기준·소통 표 갱신, 스킬에 '운영 점검'. **기존 설치본:** `upgrade`로 managed 파일 갱신, AGENTS.md(seed)는 `--include-seed` diff를 보고 '셸 명령' 절을 손으로 옮긴다. 검증: `docs/VERIFY.md` 7장 |
 | v0.1.0 | 2026-11-06 | 최초 추출: 세션 3계층 명세, tasks.yaml 스키마·DAG 검증기·렌더러·투입·정리 도구, 브랜치·머지 규약, 문서 체계(RTM·TBD·증적·과정 기록 3종, 검토 단계 선택 모듈), 설정 기반 대시보드, 실행 격리 모듈(+ROS 2 프로필), Claude Code 스킬(init·bootstrap·status·upgrade), 예제 프로젝트. 검증: `docs/VERIFY.md` |
 
