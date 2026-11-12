@@ -16,6 +16,9 @@
 #  - env:         (선택) 명세에 넣을 실행 환경 블록 이름 목록. orchestration/templates/blocks/<이름>.md
 #                 runtime.<이름>이 false면 <이름>.pending.md(있을 때)를 대신 넣는다 → '모의로 먼저, 실제로 다시'
 #  - status:      todo / ready / running / review / merged (투입 running → 증적 review → 머지 merged)
+#  - hold:        (선택) 일부러 미루는 사유. 있으면 투입 가능·할당 누락 판정에서 빠지고 launch.sh가 거부한다(예: "마스터 승인 대기")
+#  - agent/model/effort: (선택) 이 작업을 띄울 Orca 에이전트(claude, codex …)·모델 ID·추론 수준. effort는 model이 있어야 한다
+#                 없으면 kit.yaml orca.agent와 에이전트 기본 모델. launch.sh --agent/--model/--effort가 이번만 덮어쓴다
 #  - spec_template: (선택) 명세 템플릿 파일 이름. 없으면 kit.yaml spec_templates[layer]
 #                 검토 작업은 review-spec.md: layer L0, branch req/<검토ID>, base는 메인 브랜치(검토 대상 아님),
 #                 target: <검토 대상 브랜치나 커밋>, write_scope: [docs/06_evidence/<검토ID>/]
@@ -23,7 +26,8 @@
 #                 결함 수정과 새 기능은 다른 작업으로 둔다(교훈 L-10)
 #
 # 검증: python3 orchestration/tools/validate_dag.py   (중복 ID · 없는 deps · 순환 · 필드 형식)
-# 명세: python3 orchestration/tools/render_spec.py <ID> | --ready
+# 투입: orchestration/tools/launch.sh <ID>             (명세 렌더링 · 선행 확인 · task-create · worker-start)
+# 보관: python3 orchestration/tools/archive_tasks.py   (merged 작업을 tasks.archive.yaml로 옮겨 이 파일을 작게 유지)
 
 defaults:
   stage: "①"
@@ -124,7 +128,7 @@ tasks:
     reqs: []
     branch: int/alpha
     base: main
-    deps: [R-ALPHA-001]
+    deps: [G-0, R-ALPHA-001]        # L1은 G-0 뒤에 먼저 띄워 두고(L2 선행은 기다리지 않음) req마다 머지한다
     write_scope: [modules/alpha/bringup/, docs/06_evidence/I-ALPHA/]
     acceptance: "req/R-ALPHA-* 전부 머지, 모듈 종단 스모크 통과"
     status: todo
@@ -136,7 +140,7 @@ tasks:
     reqs: []
     branch: int/beta
     base: main
-    deps: [R-BETA-001]
+    deps: [G-0, R-BETA-001]
     write_scope: [modules/beta/bringup/, docs/06_evidence/I-BETA/]
     acceptance: "req/R-BETA-* 전부 머지, 모듈 종단 스모크 통과"
     status: todo

@@ -18,6 +18,8 @@ orchestration/kit.yaml
 orchestration/README.md
 orchestration/sessions/MANAGER.md
 orchestration/sessions/MASTER.md
+orchestration/sessions/procedures/merge-gate.md
+orchestration/sessions/procedures/review.md
 orchestration/specs/.gitkeep
 orchestration/state/dispatch.tsv
 orchestration/state/issues.md
@@ -29,6 +31,7 @@ orchestration/templates/evidence.md
 orchestration/templates/integration-spec.md
 orchestration/templates/review-spec.md
 orchestration/templates/worker-spec.md
+orchestration/tools/archive_tasks.py
 orchestration/tools/cleanup_worker.sh
 orchestration/tools/dashboard/build.py
 orchestration/tools/dashboard/dashboard.example.yaml
@@ -36,10 +39,16 @@ orchestration/tools/dashboard/README.md
 orchestration/tools/dashboard/serve.sh
 orchestration/tools/dashboard/snapshot.sh
 orchestration/tools/dashboard/systemd/orchestration-dashboard.service
+orchestration/tools/evidence_lint.py
+orchestration/tools/hooks/pre-push
+orchestration/tools/install_hooks.sh
 orchestration/tools/kitcfg.py
 orchestration/tools/kitlib.py
+orchestration/tools/launch.py
 orchestration/tools/launch.sh
 orchestration/tools/render_spec.py
+orchestration/tools/slot.sh
+orchestration/tools/status.py
 orchestration/tools/sync_main.sh
 orchestration/tools/task_status.py
 orchestration/tools/validate_dag.py

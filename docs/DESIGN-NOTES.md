@@ -51,17 +51,44 @@
 
 **하지 않은 것(v0.2):** 관문·범위 확인을 스크립트 도구로 만들지는 않았다. 문구와 예시 명령만 넣었다(아래 v0.3 후보 1·2). AGENTS.md는 seed라 기존 설치본은 `upgrade --include-seed`로 diff를 보고 '셸 명령' 절을 손으로 옮겨야 한다.
 
-## 4. 다음 버전(v0.3) 후보
+## 4. v0.3 반영 (효율 검토, 2026-11-12)
+
+키트 검토(설치본 dry-run, 현재 Orca CLI 1.4 대조, 두 번째 실사용 프로젝트 읽기 전용 조사)에서 나온 결함과 효율 개선이다. 교훈은 `LESSONS.md` L-14 ~ L-19. 아래 '후보 n'은 5장 번호다.
+
+### 4.1 결함 수정
+| 결함 | 원인 | 수정 |
+|---|---|---|
+| `upgrade --apply`가 '키트 밖 파일과 겹침'을 덮어씀 | 충돌만 `.kit-new`로 보냈다 | 키트 밖 파일·충돌·seed는 모두 `.kit-new`. 덮어쓰기는 `--overwrite-conflicts`만 |
+| `status`의 진행 워커 수 오판(끝난 워커를 진행으로 셈), 100개에서 잘림, 이름 대신 dispatch ID | 끝난 상태를 `succeeded`·`failed`로만 봤다. 페이지를 안 넘겼다 | `kitlib.SETTLED_WORKER_STATES`(abandoned·stopped 포함), `nextCursor` 페이지 순회, Orca 작업 제목 → 키트 ID 대응. `cleanup_worker.sh`도 같은 집합 |
+| `launch.sh`가 선행·status를 안 보고 투입, W0에서 투입 가능 목록이 빔, `int/common` 생성 안내 없음 | 투입 가능 판정이 L2 전용이었다 | `launch.py`: status todo/ready·hold·게이트·선행 merged(L1은 L2 선행 제외)·기준 브랜치 존재를 확인(`--force`로 끔). 투입 가능 목록은 모든 계층. 없는 브랜치는 만드는 명령을 알려 준다 |
+| `bootstrap` 기본값 `all`이 매니저 기동 보고 전에 abandon | 단계 사이에 기다림이 필요한데 한 번에 돌았다 | `--step` 필수, `all` 삭제. abandon은 `--work-run` 필요 |
+| 매니저 기동이 Orca에 거부될 수 있음 | 기존 워크트리(`path:`)에 생성 전용 플래그 `--display-name`을 줬다(Orca: 생성 플래그는 새 워크트리에만) | 뺐다. `launch.py`도 기존 워크트리 재사용 때는 `--name`·`--base-branch`·`--repo`·`--display-name`을 넣지 않는다 |
+| `sync_main.sh`가 현재 체크아웃의 브랜치를 바꾸고 원격에 자동 push | 체크아웃 전환 방식 | 임시 워크트리에서 머지하고 로컬 브랜치만 옮긴다(체크아웃된 브랜치는 깨끗할 때만 ff). 원격은 `--push`일 때만 |
+
+### 4.2 효율 개선
+| 주제 | 판단 | 반영 |
+|---|---|---|
+| 고정 문맥 | 모든 세션이 tasks.yaml(실사용 103KB)·구조 문서를 먼저 읽었다. 명세가 자족적이면 필요 없다 | AGENTS.md '읽을 것', 명세 템플릿 첫 줄, `archive_tasks.py`(merged 보관, 검산 후 쓰기). 도구(validate·render·launch·status·대시보드)는 보관 파일을 함께 읽는다 |
+| 매니저 명세 | 17KB 한 파일을 상시 문맥에 두고, 관문·검토 절차는 가끔 쓴다 | 핵심 `MANAGER.md` + `procedures/merge-gate.md`·`review.md`. 같은 규칙의 반복 서술을 줄였다 |
+| 스킬 본문 | 현황 확인에도 init 10단계·upgrade가 매번 로드됐다 | `SKILL.md`는 흐름 고르기·status·이어받기만, init·upgrade는 `references/`. '운영 점검'은 설치본 `MASTER.md` 5장으로 |
+| 정지 점검 | 문장 절차였다. 대기 중 매니저는 사람이 시켜야 점검했다 | `status.py`(설치본에 들어가 매니저도 쓴다): attention·커밋 없음·running 고아·할당 누락·대기할 것 없음, 메시지 ID. `hold` 필드로 일부러 미룬 작업을 구분 |
+| 실사용 프로젝트가 직접 만든 것 | 작업별 모델 지정(75개 중 73개), 교차 검토·재투입 도구, 전체 시험 잠금, 증적 검사, pre-push, 로컬 전용 운영 | `agent/model/effort` 필드, `launch.sh --review/--retry`, `slot.sh`, `evidence_lint.py`, `hooks/pre-push` + `install_hooks.sh`, `project.git_remote`(명세의 `{push}`·`{sync_base}`·`{ref}`). 계정 전환·사용량 감시처럼 특정 제공자에 묶인 도구는 넣지 않았다 |
+| upgrade 마찰 | 프로젝트가 managed 파일을 고치면 매번 충돌 | 덧붙임 파일(`templates/<이름>.local.md`, `MANAGER.local.md`, `MASTER.local.md`), 3방향 자동 병합(설치 당시 원본은 키트 git 이력에서 sha로 찾는다. 못 찾으면 예전처럼 `.kit-new`), `status`의 새 버전 알림 |
+| Orca 의미 변화 | 현재 가이드: 일하는 워커에 send → 턴 끝난 뒤 전달, 끝난 워커 → 후속 Task | L-06·L-07 규칙은 유지(원 범위에 섞이지 않는 점은 같다). 문구를 현재 동작에 맞추고, 근거(tasks.yaml 정본)를 적었다 |
+
+**하지 않은 것(v0.3):** 동시 실행 한도 자동 제한(후보 4), cleanup 일괄 모드(5), doctor(6), 대시보드 워커 탭(7), RTM 자동 갱신(8), 추가 프로필(9), 영문 템플릿(11), 공개판 생성기(12), CI. Orca 실기동(워커 생성·send 의미) 재확인은 하지 않았다(dry-run과 CLI 도움말·가이드 대조만).
+
+## 5. v0.2 때 정리한 다음 버전 후보 (처리 결과 표시)
 1. **체계 스모크 골격 도구(I-43):** `tools/`에 기동 → 핵심 흐름 → 판정 → 정리 골격(종료코드 0 통과 / 1 실패 / 75 환경 문제), 전제 상태 대기·실패 로그 보존·실시간 비율 기록 내장.
-2. **머지 범위 확인 도구(I-48):** `tools/merge_scope.sh <A> <B> <허용 경로>...` — quotePath 끔, 범위 밖이면 목록과 종료코드 1. 매니저 관문과 검토 보고서 가져오기에 쓴다.
-3. **정지 점검 도구(L-13):** 실행 중 워커 수·워커 브랜치 마지막 커밋 시각·escalation을 한 줄로 내는 `kit.py status --stall`.
+2. **머지 범위 확인 도구(I-48):** `tools/merge_scope.sh <A> <B> <허용 경로>...` — quotePath 끔, 범위 밖이면 목록과 종료코드 1. 매니저 관문과 검토 보고서 가져오기에 쓴다. (v0.3: `merge-gate.md` 2의 명령 예시 유지, 도구화는 보류)
+3. **정지 점검 도구(L-13):** 실행 중 워커 수·워커 브랜치 마지막 커밋 시각·escalation을 한 줄로 내는 `kit.py status --stall`. **→ v0.3 반영** (`status.py --stall`)
 4. **launch.sh 동시 실행 한도 연동:** 실측 한도·HEAVY 슬롯 사용량을 보고 투입 수를 자동 제한(`--max-active`).
-5. **cleanup 일괄 모드:** merged 작업을 tasks.yaml·dispatch.tsv에서 찾아 조건 맞는 워커를 한 번에 정리.
-6. **kit.py doctor:** Orca CLI·PyYAML·docker·rsync·ssh BatchMode·tailscale serve 충돌을 한 번에 점검.
+5. **cleanup 일괄 모드:** merged 작업을 tasks.yaml·dispatch.tsv에서 찾아 조건 맞는 워커를 한 번에 정리. (보류: 정리 조건 판단은 사람이 보도록 둔다)
+6. **kit.py doctor:** Orca CLI·PyYAML·docker·rsync·ssh BatchMode·tailscale serve 충돌을 한 번에 점검. (보류)
 7. **대시보드:** Orca 워커 목록(진행·대기·escalation) 탭, 마스터 메일함 요약, 지표 표(07_process 01) 그래프, 스냅샷 비교.
 8. **RTM 자동 갱신 도우미:** 머지 커밋·증적 판정으로 RTM 검증 칸 갱신 후보를 제시(매니저 확인 후 반영).
 9. **추가 실행 프로필:** `web`(DB 이름·포트 접두 격리), `ml`(학습 이미지·GPU 기본값), `node`/`python` 시험 러너 병렬 격리 예시.
-10. **upgrade 3방향 자동 병합:** 설치 당시 렌더링 원본을 저장해 `git merge-file`로 충돌을 줄인다.
+10. **upgrade 3방향 자동 병합:** 설치 당시 렌더링 원본을 저장해 `git merge-file`로 충돌을 줄인다. **→ v0.3 반영** (설치 당시 원본을 키트 git 이력에서 되살려 `git merge-file`)
 11. **영문 템플릿:** 문서·명세 템플릿 영어판(언어 선택 `--lang`).
 12. **과정 기록 공개판 생성기:** 07_process에서 요구 문구·고객 정보·가격을 걸러 낸 공개용 판을 만드는 도구.
-13. **검증:** 키트 자체의 회귀 시험(`tests/`: init 배치, 렌더링, DAG 검증 사례, 대시보드 스냅샷 비교)과 CI.
+13. **검증:** 키트 자체의 회귀 시험(`tests/`: init 배치, 렌더링, DAG 검증 사례, 대시보드 스냅샷 비교)과 CI. **→ v0.3 일부 반영** (`tests/smoke.sh`, CI는 보류)

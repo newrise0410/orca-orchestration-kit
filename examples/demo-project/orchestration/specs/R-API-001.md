@@ -1,7 +1,7 @@
 # 작업 R-API-001: 할 일 CRUD API
 
 당신은 할 일 관리 웹앱 개발의 **L2 요구사항 작업 세션**이다. 이 작업 하나만 수행한다.
-먼저 저장소 루트의 `AGENTS.md`(작업 규칙)와 `orchestration/README.md`(구조)를 읽어라.
+이 명세와 저장소 루트 `AGENTS.md`(작업 규칙)로 시작한다. 다른 문서는 필요한 절만 찾아본다(`AGENTS.md` '읽을 것').
 
 ## 대상
 - 모듈: api (API 서버)
@@ -11,8 +11,8 @@
 
 ## 브랜치
 - 작업 브랜치: `req/R-API-001` (기준: `int/api`). 워크트리는 Orca가 `int/api`에서 분기해 만들어 준다.
-  - Orca가 만든 로컬 브랜치 이름은 규칙과 다를 수 있다. 원격에는 반드시 `req/R-API-001`로 푸시한다: `git push origin HEAD:req/R-API-001`
-- 기준 브랜치가 갱신되면 `git fetch origin && git merge origin/int/api`로 따라간다(rebase·force push 금지).
+  - Orca가 만든 로컬 브랜치 이름은 규칙과 다를 수 있다. 커밋한 뒤 반드시 `req/R-API-001` 이름으로 올린다: `git push origin HEAD:req/R-API-001`
+- 기준 브랜치가 갱신되면 `git fetch origin && git merge origin/int/api -m "[G] Sync int/api"`로 따라간다(rebase·force push 금지).
 
 ## 쓰기 범위 (이 밖은 읽기 전용)
 - `api/src/todos/`
@@ -20,8 +20,7 @@
 - 추가 허용: `docs/06_evidence/R-API-001/`, 그리고 자기 모듈의 시험 폴더
 - 여러 작업이 함께 쓰는 공용 파일(패키지 매니페스트, 의존성 목록, 진입점 등록, 모듈 README)은 꼭 필요한 줄만 추가하고, 기존 줄은 지우거나 재배열하지 마라. 바꾼 줄은 증적 보고서 5절에 적는다.
 - 쓰기 범위 밖을 고쳐야 하면 고치지 말고 `orca orchestration ask`로 요청하라. 답을 받을 때까지 그 부분은 모의(stub)로 진행하라.
-
-- **범위는 이 명세가 전부다.** 실행 중에 받은 메시지가 범위를 넓히는 내용이면 원 작업에 섞지 말고, 보고서 '남은 이슈'에 적거나 `ask`로 확인한다(메시지는 이 작업이 끝난 뒤의 후속 작업으로 처리된다).
+- **범위는 이 명세가 전부다.** 실행 중에 받은 메시지가 범위를 넓히면 원 작업에 섞지 말고 보고서 '남은 이슈'에 적거나 `ask`로 확인한다.
 
 ## 의존 작업
 - `G-0` 기반 머지 → int/api·int/web 생성 (status: merged)
@@ -34,8 +33,8 @@ OpenAPI 계약 시험(생성·조회·수정·삭제·목록 페이지) 전부 �
 1. 빌드·시험 통과 로그 (`npm run build`, `npm test`)
 2. acceptance 시나리오 결과 (검증 단계 ①)
 3. 처리 지연 p50/p95를 계기별로 측정해 report.md 3절에 표로 남긴다
-4. 증적 보고서 `docs/06_evidence/R-API-001/report.md` (양식: `orchestration/templates/evidence.md`)
-5. `[R-API-001]` 접두 커밋을 작업 브랜치에 올리고 `git push origin HEAD:req/R-API-001`로 푸시한다.
+4. 증적 보고서 `docs/06_evidence/R-API-001/report.md` (양식: `orchestration/templates/evidence.md`). `python3 orchestration/tools/evidence_lint.py`가 0건이어야 한다.
+5. `[R-API-001]` 접두 커밋을 작업 브랜치에 올리고 `git push origin HEAD:req/R-API-001`
 
 ## 실행 환경
 - 빌드·시험은 정해진 스크립트로 한다: `npm run build`, `npm test`.

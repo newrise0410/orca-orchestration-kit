@@ -41,4 +41,6 @@ python3 orchestration/tools/render_spec.py R-API-001 R-WEB-001 I-WEB
 cp orchestration/specs/R-API-001.md orchestration/specs/R-WEB-001.md orchestration/specs/I-WEB.md "$HERE/orchestration/specs/"
 mkdir -p "$HERE/dashboard"
 python3 orchestration/tools/dashboard/build.py --out "$HERE/dashboard/index.html"
+# 결과물에 작업 폴더 경로(사용자 이름이 들 수 있다)를 남기지 않는다
+for f in "$HERE/dashboard/index.html" "$HERE/validate_dag.txt" "$HERE"/orchestration/specs/*.md; do sed -i "s#$(dirname "$W")#/tmp/kit-verify/demo#g" "$f"; done
 echo "작업 저장소: $W"

@@ -34,15 +34,12 @@ Orca 오케스트레이션(Run · Task DAG · Worker)으로 개발한다.
 - 머지는 **`--no-ff`**다. 요구사항 단위 머지 커밋이 남아 RTM과 git 이력이 1:1로 이어진다.
 - **rebase·force push 금지.** 하위 브랜치는 상위 브랜치를 `merge`로 따라간다.
 - 커밋 메시지 첫 줄은 **`[작업ID]`** 접두로 시작한다(`[L0]` 운영, `[G]` 머지·동기화). 대시보드가 이 접두로 진행을 추적한다. 동기화 머지도 `-m "[G] Sync ..."`로 커밋한다(기본 메시지 금지).
-- Orca가 만드는 워커의 로컬 브랜치 이름은 규칙과 다를 수 있다. 명세에 `git push origin HEAD:req/<ID>`를 넣어 원격 이름을 맞춘다.
+- Orca가 만드는 워커의 로컬 브랜치 이름은 규칙과 다를 수 있다. 명세에 `git push <원격> HEAD:req/<ID>`(로컬 전용이면 `git push . HEAD:req/<ID>`)를 넣어 이름을 맞춘다.
+- **원격:** {{PUSH_POLICY}}
 - 공통 기반이 바뀌면 매니저가 `{{MAIN_BRANCH}}`에 반영 → `int/*`가 `{{MAIN_BRANCH}}`를 머지 → 진행 중인 `req/*`가 자기 `int/*`를 머지한다.
 
-워커 생성 예:
-```bash
-orca orchestration worker-start --task <task_id> --agent claude \
-  --worktree new-top-level --repo id:<repoId> --base-branch int/<모듈> --name <id소문자>
-```
-보통은 `orchestration/tools/launch.sh <작업ID>`가 렌더링·생성·투입·상태 갱신을 한 번에 한다.
+투입은 `orchestration/tools/launch.sh <작업ID>`가 한 번에 한다: 선행 작업·status·기준 브랜치 확인 → 명세 렌더링 → `task-create` → `worker-start --worktree new-top-level --base-branch <기준>` → tasks.yaml running.
+작업 항목의 `agent`·`model`·`effort`가 있으면 그 모델로 띄운다. 구현 검토는 `--review`, 남은 지적 재투입은 `--retry`.
 
 ## 3. 웨이브
 
@@ -88,15 +85,15 @@ L2 작업은 아래를 모두 만족해야 `worker_done`을 보낼 수 있다.
 2. 단위 시험이 통과하고, 요구사항 ID를 시험 이름이나 docstring에 표기한다.
 3. acceptance 시나리오를 검증 단계 ①에서 실행했고 결과가 있다.
 4. `perf: true` 작업은 지연 p50/p95를 남겼다. **지연은 계기(무엇이 출력을 일으켰나)별로 나눠 잰다.**
-5. `docs/06_evidence/<작업ID>/report.md`를 작성했다(양식 `templates/evidence.md`).
+5. `docs/06_evidence/<작업ID>/report.md`를 작성했고 `evidence_lint.py`가 0건이다(양식 `templates/evidence.md`).
 6. `[<작업ID>]` 접두 커밋을 자기 브랜치에 푸시했다.
 7. 새 외부 의존성과 라이선스를 report.md에 적었다.
 
 L1 작업은 소속 req/*를 모두 머지하고, 모듈 스모크를 통과하고, `docs/06_evidence/I-<모듈>/report.md`를 작성해야 완료다.
 
-**`{{MAIN_BRANCH}}` 머지 관문**(매니저, `sessions/MANAGER.md` 3장): 머지 범위 확인(실패하면 멈춤) → build → 전체 시험 → **체계 스모크**(모듈 사이 실제 값으로 핵심 흐름 하나, 시험 전용 덧씌움 없이 기본 설정, 몇 분). 관문은 전용 체크아웃에서 돌리고 결과에 실행 HEAD와 회차 유효성(시뮬이면 실시간 비율·부하)을 남긴다. 기준 미달 회차는 PASS여도 무효다.
+**`{{MAIN_BRANCH}}` 머지 관문**(매니저, `sessions/procedures/merge-gate.md`): 머지 범위 확인(실패하면 멈춤) → build → 전체 시험 → **체계 스모크**(모듈 사이 실제 값으로 핵심 흐름 하나, 시험 전용 덧씌움 없이 기본 설정, 몇 분). 관문은 전용 체크아웃에서 돌리고 결과에 실행 HEAD와 회차 유효성(시뮬이면 실시간 비율·부하)을 남긴다. 기준 미달 회차는 PASS여도 무효다.
 
-**검토 작업**(`templates/review-spec.md`): 보고서 브랜치는 `{{MAIN_BRANCH}}` 기준, 대상은 읽기 전용 체크아웃. 머지 차단은 실행으로 재현되는 반례만. 보고서는 경로만 가져온다.
+**검토 작업**(`templates/review-spec.md`, `sessions/procedures/review.md`): 보고서 브랜치는 `{{MAIN_BRANCH}}` 기준, 대상은 읽기 전용 체크아웃. 머지 차단은 실행으로 재현되는 반례만. 보고서는 경로만 가져온다.
 
 **부분 완료:** 문맥이 모자란 L2는 끝난 묶음까지 커밋·푸시하고 `결과: 부분` + 남은 목록으로 끝낸다. 남은 것은 매니저가 새 작업으로 낸다.
 
@@ -105,8 +102,8 @@ L1 작업은 소속 req/*를 모두 머지하고, 모듈 스모크를 통과하�
 | 방향 | 명령 |
 |---|---|
 | L2·L1 → 매니저 질문 | `orca orchestration ask` (그다음 턴을 끝낸다) |
-| 매니저 → 워커 정보 | `orca orchestration send --to dispatch:<id>` (보내기 전에 `worker-list`로 최신 디스패치 확인). **실행 중 send는 원 작업에 섞이지 않고 후속 작업이 된다** — 짧은 정보만 보낸다. 범위는 명세에 처음부터 넣는다 |
-| 매니저 → 워커 새 일 | 끝난 작업 뒤의 일은 **새 작업**(`launch.sh <새 ID>` = task-create + worker-start). 터미널 입력·메시지로 '이어서 하라'고 하지 않는다 |
+| 매니저 → 워커 정보 | `orca orchestration send --to dispatch:<id>` (보내기 전에 `worker-list`로 최신 디스패치 확인). 일하는 워커에는 현재 턴이 끝난 뒤, 끝난 워커에는 후속 Task로 전달된다 — **원 명세 범위에 섞이지 않는다.** 짧은 정보만 보내고 receipt를 확인한다 |
+| 매니저 → 워커 새 일 | 범위 추가·끝난 작업 뒤의 일은 **tasks.yaml 항목 + 새 작업**(`launch.sh <새 ID>`, 지적 수정은 `--retry`). 워커 터미널에 직접 입력하지 않는다 |
 | 매니저 → 마스터 보고·질문 | `orca orchestration send --to run:<마스터 Run> --type status\|question` (`dispatch:`로 보내지 않는다. 후속 작업이 중첩된다) |
 | 마스터 → 매니저 지시 | `orca orchestration send --to run:<작업 Run>` |
 
@@ -122,6 +119,16 @@ L1 작업은 소속 req/*를 모두 머지하고, 모듈 스모크를 통과하�
 - 정리한 워커에 보완이 필요하면 원격 브랜치에서 새 워커를 띄운다(`worker-start --base-branch req/<ID>`). 작은 보완은 관련 워커나 L1에 쓰기 범위를 좁게 넓혀 맡긴다.
 
 ## 8. 상태 파일
+- `tasks.yaml`: 진행 중·남은 작업(정본). 일부러 미루는 작업은 `hold: <사유>`.
+- `tasks.archive.yaml`: merged 작업 보관(`tools/archive_tasks.py`가 옮긴다). 도구가 함께 읽고, 사람·세션은 평소에 읽지 않는다.
 - `state/issues.md`: 매니저 작업 메모(정리본은 `docs/07_process/03_*`)
-- `state/dispatch.tsv`: 투입 기록(작업 ID, task, dispatch, 워크트리, 시각) — `launch.sh`가 쓴다
-- `specs/<ID>.md`: 렌더링된 명세, `specs/<ID>.extra.md`: 투입 전 인계 사항(렌더러가 끝에 붙인다)
+- `state/dispatch.tsv`: 투입 기록(제목, task, dispatch, 워크트리, 시각) — `launch.sh`가 쓴다
+- `specs/<ID>.md`: 렌더링된 명세, `specs/<ID>.extra.md`: 투입 전 인계 사항(렌더러가 끝에 붙인다), `specs/<ID>.review*.md`·`<ID>.retry-*.md`: 검토·재투입 명세
+
+## 9. 프로젝트 덧붙임 (키트 파일을 고치지 않고 규칙을 더한다)
+키트 소유(managed) 파일을 직접 고치면 `upgrade` 때 충돌한다. 프로젝트 규칙은 덧붙임 파일에 둔다.
+| 대상 | 덧붙임 파일 | 반영 |
+|---|---|---|
+| 작업 명세 템플릿 `templates/<이름>.md` | `templates/<이름>.local.md` (예: `worker-spec.local.md`) | 렌더러가 명세의 '## 종료' 앞에 넣는다. `{branch}` 같은 자리표시자를 쓸 수 있다 |
+| 매니저 명세 | `sessions/MANAGER.local.md` | 매니저 기동 명세 끝에 붙는다 |
+| 마스터 명세 | `sessions/MASTER.local.md` | 마스터가 MASTER.md 다음에 읽는다 |

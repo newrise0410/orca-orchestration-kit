@@ -4,6 +4,7 @@
 #   예)   orchestration/tools/cleanup_worker.sh r-api-001 req/R-API-001 int/api
 #   네 조건(보고 완료·푸시됨·상위에 머지됨·변경 없음)을 하나라도 못 맞추면 아무것도 지우지 않고 이유를 출력한 뒤 종료코드 1.
 #   설정: orca.work_run(KIT_RUN), run.cleanup_hook(KIT_CLEANUP_HOOK: '<훅> <워크트리이름>'으로 호출. 예: scripts/run/cleanup_hook.sh)
+#         project.git_remote(비면 로컬 전용: 브랜치 비교를 로컬 브랜치로 한다)
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 T=orchestration/tools
@@ -13,19 +14,21 @@ DRY=0; [ "${1:-}" = "--dry-run" ] && { DRY=1; shift; }
 n=$1; rb=$2; up=$3
 RUN="${KIT_RUN:-$(python3 $T/kitcfg.py orca.work_run)}"
 HOOK="${KIT_CLEANUP_HOOK:-$(python3 $T/kitcfg.py run.cleanup_hook)}"
+REM="$(python3 $T/kitcfg.py project.git_remote origin)"; P=""; [ -n "$REM" ] && P="$REM/"
 # 워크트리 경로: git worktree 목록에서 폴더 이름이 n인 것
 d=$(git worktree list --porcelain | awk -v n="$n" '/^worktree /{p=substr($0,10); k=split(p,a,"/"); if (a[k]==n) print p}' | head -1)
 [ -n "$d" ] || { echo "보류 $n: 워크트리를 찾지 못했다 (git worktree list)"; exit 1; }
-git fetch -q origin
+[ -n "$REM" ] && git fetch -q "$REM"
 head=$(git -C "$d" rev-parse HEAD)
-[ "$head" = "$(git rev-parse -q --verify "origin/$rb" || true)" ] || { echo "보류 $n: 원격 $rb와 HEAD가 다르다(미푸시)"; exit 1; }
-git merge-base --is-ancestor "$head" "origin/$up" || { echo "보류 $n: $up에 머지되지 않았다"; exit 1; }
+[ "$head" = "$(git rev-parse -q --verify "$P$rb" || true)" ] || { echo "보류 $n: $P$rb와 HEAD가 다르다(미푸시)"; exit 1; }
+git merge-base --is-ancestor "$head" "$P$up" || { echo "보류 $n: $P$up에 머지되지 않았다"; exit 1; }
 [ -z "$(git -C "$d" status --porcelain)" ] || { echo "보류 $n: 작업 트리에 변경이 있다"; exit 1; }
-wl=$("$ORCA" orchestration worker-list ${RUN:+--run "$RUN"} --json)
+wl=$("$ORCA" orchestration worker-list ${RUN:+--run "$RUN"} --limit 100 --json)
 act=$(printf '%s' "$wl" | python3 -c "
 import json,sys
 ws=json.load(sys.stdin).get('result',{}).get('workers',[])
-print(' '.join(w['dispatchId'] for w in ws if str(w.get('workspace','')).endswith('/$n') and w.get('state') not in ('succeeded','failed')))")
+done={'succeeded','failed','abandoned','stopped','cancelled','canceled'}
+print(' '.join(w['dispatchId'] for w in ws if str(w.get('workspace','')).endswith('/$n') and w.get('state') not in done))")
 [ -z "$act" ] || { echo "보류 $n: 끝나지 않은 디스패치 $act"; exit 1; }
 dsps=$(printf '%s' "$wl" | python3 -c "
 import json,sys

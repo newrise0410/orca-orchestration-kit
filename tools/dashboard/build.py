@@ -64,6 +64,7 @@ DEFAULT_CONFIG = {
     "request_prefix": "req/",         # 요구사항 작업 브랜치 접두
     "paths": {
         "tasks": "orchestration/tasks.yaml",
+        "tasks_archive": "orchestration/tasks.archive.yaml",   # archive_tasks.py가 옮긴 merged 작업
         "docs": "docs",
         "evidence": "docs/06_evidence/{id}/report.md",
         "evidence_dir": "06_evidence",
@@ -470,7 +471,15 @@ def load_tasks(repo, git, ref):
     defaults = data.get("defaults") or {}
     letters = parse_req_comments(text)
     warnings, tasks = [], []
-    for raw in data.get("tasks") or []:
+    # 보관 파일(merged 작업)도 같은 기준(작업 트리 또는 ref)에서 읽는다
+    arel = CFG["paths"].get("tasks_archive") or "orchestration/tasks.archive.yaml"
+    atext = git.run("show", f"{ref}:{arel}") if ref else ((repo / arel).read_text(encoding="utf-8") if (repo / arel).is_file() else None)
+    archived = [r for r in ((yaml.safe_load(atext) or {}).get("tasks") or []) if isinstance(r, dict)] if atext else []
+    if atext:
+        letters = {**parse_req_comments(atext), **letters}
+    active_ids = {str(r.get("id")) for r in data.get("tasks") or [] if isinstance(r, dict)}
+    archived = [r for r in archived if str(r.get("id")) not in active_ids]
+    for raw in archived + list(data.get("tasks") or []):
         t = {
             "id": str(raw.get("id")),
             "title": str(raw.get("title", "")),

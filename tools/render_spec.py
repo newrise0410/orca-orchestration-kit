@@ -6,8 +6,11 @@
   - 자리표시자: {id} {title} {layer} {module} {module_name} {reqs} {branch} {base} {write_scope}
                {acceptance} {perf_line} {deps_block} {env_block} {evidence} {evidence_dir}
                {stage} {rtm} {tbd} {main_branch} {project} {target}(검토 대상, 없으면 '-')
+               {push}(작업 브랜치 올리기 명령) {sync_base}(기준 브랜치 따라가기 명령) {ref}(원격 브랜치 접두, 로컬 전용이면 빈 값)
                그 밖에 작업 항목의 문자열 필드도 {필드명}으로 쓸 수 있다.
   - 알려진 이름만 바꾸고 나머지 중괄호는 그대로 둔다(코드 예시가 깨지지 않는다).
+프로젝트 덧붙임: templates/<템플릿 이름>.local.md(예: worker-spec.local.md)가 있으면 렌더링해 명세의 '## 종료' 앞에 넣는다.
+  키트 템플릿(managed)을 고치지 않고 프로젝트 규칙을 더하는 곳이다. upgrade가 충돌하지 않는다.
 실행 환경 블록: orchestration/templates/blocks/
   - _always.md는 항상 넣는다.
   - 작업의 env: [이름, ...] 마다 <이름>.md를 넣는다. tasks.yaml runtime.<이름>이 false이고
@@ -16,8 +19,10 @@
 
 사용:
   python3 orchestration/tools/render_spec.py <ID> [ID ...]
-  python3 orchestration/tools/render_spec.py --ready         # deps가 모두 merged인 todo/ready L2 작업
+  python3 orchestration/tools/render_spec.py --ready         # 투입 가능한 작업 전부(게이트 제외)
   python3 orchestration/tools/render_spec.py --list-ready    # 렌더링 없이 ID만 출력
+  python3 orchestration/tools/render_spec.py <ID> --review [--suffix r2]        # <ID>를 검토하는 명세 → specs/<ID>.review[-r2].md
+  python3 orchestration/tools/render_spec.py <ID> --retry <지적.md> --suffix r1  # req/<ID>에서 남은 지적 수정 → specs/<ID>.retry-r1.md
 옵션:
   --stdout  파일 대신 표준출력      --out-dir DIR  저장 폴더 (기본: kit.yaml paths.specs)
   --repo / --config / --tasks / --templates  경로 지정
@@ -38,14 +43,21 @@ def fill(text, vals):
     return PLACEHOLDER.sub(lambda m: str(vals[m.group(1)]) if m.group(1) in vals else m.group(0), text)
 
 
-def ready_ids(tasks):
-    out = []
-    for t in tasks.values():
-        if t.get("layer") != "L2" or str(t.get("status", "todo")) not in ("todo", "ready"):
-            continue
-        if all(tasks.get(d, {}).get("status") == "merged" for d in kitlib.as_list(t.get("deps"))):
-            out.append(str(t["id"]))
-    return out
+def ready_ids(tasks, cfg=None):
+    """투입 가능한 작업 ID(보관 작업 제외, 게이트 제외). L1은 L2 선행을 기다리지 않는다."""
+    cfg = cfg or {}
+    return [str(t["id"]) for t in tasks.values() if not t.get("_archived") and kitlib.is_ready(t, tasks, cfg)]
+
+
+def git_cmds(cfg, branch, base):
+    rem = kitlib.git_remote(cfg)
+    if rem:
+        return {"ref": f"{rem}/",
+                "push": f"git push {rem} HEAD:{branch}",
+                "sync_base": f'git fetch {rem} && git merge {rem}/{base} -m "[G] Sync {base}"'}
+    return {"ref": "",
+            "push": f"git push . HEAD:{branch}",
+            "sync_base": f'git merge {base} -m "[G] Sync {base}"'}
 
 
 def env_block(t, runtime, blocks_dir, vals, warn):
@@ -65,7 +77,15 @@ def env_block(t, runtime, blocks_dir, vals, warn):
     return fill("\n".join(parts), vals) if parts else "- 특별한 실행 환경 요구 없음"
 
 
-def render(t, tasks, cfg, runtime, tpl_dir, warn):
+def insert_before_end(text, block):
+    """'## 종료' 절 앞에 넣는다. 없으면 끝에 붙인다."""
+    m = re.search(r"^## 종료", text, flags=re.M)
+    if not m:
+        return text.rstrip() + "\n\n" + block.rstrip() + "\n"
+    return text[:m.start()] + block.rstrip() + "\n\n" + text[m.start():]
+
+
+def render(t, tasks, cfg, runtime, tpl_dir, warn, template=None):
     deps = kitlib.as_list(t.get("deps"))
     if deps:
         deps_block = "\n".join(
@@ -100,19 +120,52 @@ def render(t, tasks, cfg, runtime, tpl_dir, warn):
         "project": kitlib.cfg_get(cfg, "project.name", ""),
         "target": t.get("target", "-"),
     }
+    vals.update(git_cmds(cfg, vals["branch"], vals["base"]))
     for k, v in t.items():   # 작업 항목의 다른 문자열 필드
-        if isinstance(v, (str, int, float)) and k not in vals:
+        if isinstance(v, (str, int, float)) and k not in vals and not k.startswith("_"):
             vals[k] = v
     vals["env_block"] = env_block(t, runtime, tpl_dir / "blocks", vals, warn)
-    # 예전 템플릿 호환: {sim_block}
-    vals["sim_block"] = vals["env_block"]
+    vals["sim_block"] = vals["env_block"]   # 예전 템플릿 호환
     sel = cfg.get("spec_templates") or {}
-    name = t.get("spec_template") or sel.get(str(t.get("layer")), sel.get("default", "worker-spec.md"))
+    name = template or t.get("spec_template") or sel.get(str(t.get("layer")), sel.get("default", "worker-spec.md"))
     tpl = tpl_dir / name
     if not tpl.is_file():
         warn(f"{t['id']}: 명세 템플릿 {name} 없음 → worker-spec.md로 대신 렌더링 ({tpl_dir})")
         tpl = tpl_dir / "worker-spec.md"
-    return fill(tpl.read_text(encoding="utf-8"), vals)
+    text = fill(tpl.read_text(encoding="utf-8"), vals)
+    local = tpl.with_name(tpl.stem + ".local.md")
+    if local.is_file():
+        text = insert_before_end(text, fill(local.read_text(encoding="utf-8"), vals))
+    return text
+
+
+def review_task(t, cfg, suffix=""):
+    """작업 t의 구현(작업 브랜치)을 검토하는 가상 작업. 보고서 브랜치는 메인 기준, 쓰기 범위는 검토 증적 폴더뿐."""
+    rid = f"{t['id']}-RV" + (f"-{suffix}" if suffix else "")
+    main = kitlib.cfg_get(cfg, "project.main_branch", "main")
+    ev_pat = str(kitlib.cfg_get(cfg, "paths.evidence", "docs/06_evidence/{id}/report.md"))
+    ev_dir = str(Path(ev_pat.replace("{id}", rid)).parent) + "/"
+    rem = kitlib.git_remote(cfg)
+    target = f"{rem}/{t.get('branch')}" if rem else str(t.get("branch"))
+    acc = " ".join(str(t.get("acceptance", "")).split())
+    return {
+        "id": rid, "title": f"{t['id']} 구현 검토 — {t.get('title', '')}", "layer": "L0",
+        "module": kitlib.task_module(t), "reqs": t.get("reqs") or [], "branch": f"req/{rid}", "base": main,
+        "deps": [], "write_scope": [ev_dir], "target": target, "status": "todo",
+        "acceptance": f"검토 대상 작업 {t['id']}의 완료 판정을 실행으로 다시 확인한다: {acc} "
+                      f"명세(orchestration/specs/{t['id']}.md)·쓰기 범위·시험 누락을 본다. 머지 차단 H는 실행 재현 반례만이다.",
+        "env": t.get("env") or [],
+    }
+
+
+def retry_section(t, notes_text, cfg):
+    g = git_cmds(cfg, t.get("branch", ""), t.get("branch", ""))
+    sync = git_cmds(cfg, t.get("branch", ""), t.get("base", ""))["sync_base"]
+    return (f"## 재투입 (남은 지적 수정)\n"
+            f"이 작업은 이미 구현돼 있다. 이 워크트리는 `{t.get('branch')}`에서 분기했다. **처음부터 다시 만들지 말고** 아래 지적만 모두 해소하라.\n"
+            f"- 시작: `{sync}`로 기준을 따라간다.\n"
+            f"- 끝: 빌드·전체 시험 통과 → `[{t['id']}] 남은 지적 수정` 커밋 → `{g['push']}` → `worker_done`(해소한 지적 / 못 한 지적과 이유).\n\n"
+            f"### 지적\n{notes_text.rstrip()}\n")
 
 
 def main(argv=None):
@@ -120,6 +173,9 @@ def main(argv=None):
     ap.add_argument("ids", nargs="*")
     ap.add_argument("--ready", action="store_true")
     ap.add_argument("--list-ready", action="store_true")
+    ap.add_argument("--review", action="store_true", help="작업의 구현을 검토하는 명세를 만든다")
+    ap.add_argument("--retry", metavar="NOTES", help="남은 지적 파일: req/<ID>에서 수정하는 재투입 명세를 만든다")
+    ap.add_argument("--suffix", default="", help="검토·재투입 차수 이름 (예: r1)")
     ap.add_argument("--stdout", action="store_true")
     ap.add_argument("--no-extra", action="store_true", help="specs/<ID>.extra.md를 붙이지 않는다")
     ap.add_argument("--repo"), ap.add_argument("--config"), ap.add_argument("--tasks")
@@ -128,17 +184,26 @@ def main(argv=None):
     a = ap.parse_args(argv)
     repo = kitlib.repo_root(a.repo)
     cfg = kitlib.load_config(repo, a.config)
-    data, _ = kitlib.load_tasks_text(kitlib.tasks_path(repo, cfg, a.tasks).read_text(encoding="utf-8"))
-    tasks = {str(t["id"]): t for t in data.get("tasks") or []}
+    data, tasks = kitlib.all_tasks(repo, cfg, a.tasks)
+    active = {str(t["id"]) for t in data.get("tasks") or [] if isinstance(t, dict) and t.get("id") is not None}
+    for k, t in tasks.items():
+        if k not in active:
+            t["_archived"] = True
     runtime = data.get("runtime") or {}
     tpl_dir = Path(a.templates) if a.templates else repo / kitlib.cfg_get(cfg, "paths.templates", "orchestration/templates")
     out_dir = Path(a.out_dir) if a.out_dir else repo / kitlib.cfg_get(cfg, "paths.specs", "orchestration/specs")
     warn = lambda m: print(f"경고: {m}", file=sys.stderr)  # noqa: E731
 
     if a.list_ready:
-        print("\n".join(ready_ids(tasks)))
+        print("\n".join(ready_ids(tasks, cfg)))
         return 0
-    ids = ready_ids(tasks) if a.ready else a.ids
+    if a.review and a.retry:
+        print("--review와 --retry는 함께 쓸 수 없다", file=sys.stderr)
+        return 2
+    if a.retry and not a.suffix:
+        print("--retry에는 --suffix(차수 이름, 예: r1)가 필요하다", file=sys.stderr)
+        return 2
+    ids = ready_ids(tasks, cfg) if a.ready else a.ids
     if not ids:
         print("렌더링할 작업이 없다", file=sys.stderr)
         return 1
@@ -146,15 +211,28 @@ def main(argv=None):
         if i not in tasks:
             print(f"알 수 없는 작업 ID: {i}", file=sys.stderr)
             return 1
-        text = render(tasks[i], tasks, cfg, runtime, tpl_dir, warn)
-        extra = out_dir / f"{i}.extra.md"
-        if not a.no_extra and extra.is_file():
-            text = text.rstrip() + "\n\n" + extra.read_text(encoding="utf-8")
+        t = tasks[i]
+        if a.review:
+            rt = review_task(t, cfg, a.suffix)
+            text = render(rt, tasks, cfg, runtime, tpl_dir, warn, template="review-spec.md")
+            stem = f"{i}.review" + (f"-{a.suffix}" if a.suffix else "")
+        else:
+            text = render(t, tasks, cfg, runtime, tpl_dir, warn)
+            stem = i
+            if a.retry:
+                text = insert_before_end(text, retry_section(t, Path(a.retry).read_text(encoding="utf-8"), cfg))
+                stem = f"{i}.retry-{a.suffix}"
+        # 인계 사항: 원 작업의 <ID>.extra.md(검토 명세 제외) + 이 명세 전용 <stem>.extra.md
+        extras = ([] if a.review else [f"{i}.extra.md"]) + ([f"{stem}.extra.md"] if stem != i else [])
+        for name in extras:
+            extra = out_dir / name
+            if not a.no_extra and extra.is_file():
+                text = text.rstrip() + "\n\n" + extra.read_text(encoding="utf-8")
         if a.stdout:
             print(text)
         else:
             out_dir.mkdir(parents=True, exist_ok=True)
-            out = out_dir / f"{i}.md"
+            out = out_dir / f"{stem}.md"
             out.write_text(text, encoding="utf-8")
             try:
                 print(out.relative_to(repo))
