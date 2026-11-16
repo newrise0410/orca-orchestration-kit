@@ -23,6 +23,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -96,6 +97,9 @@ def yaml_inline(d):
     return yaml.safe_dump(d, allow_unicode=True, default_flow_style=True, width=1000).strip()
 
 
+AGENT_BINS = {"claude": "claude", "codex": "codex", "antigravity": "agy", "grok": "grok"}
+
+
 def build_vars(ans, today):
     mods = ans["modules"]
     stages = review_preset(ans.get("review_preset"))
@@ -108,6 +112,10 @@ def build_vars(ans, today):
     rem = "" if rem in (None, False) else str(rem).strip()
     prot = ans.get("protected") or ""
     prot = [x.strip() for x in (prot.split(",") if isinstance(prot, str) else prot) if str(x).strip()]
+    agents = ans.get("agents") or ""
+    agents = [x.strip() for x in (agents.split(",") if isinstance(agents, str) else agents) if str(x).strip()]
+    if not agents:   # 설치된 구독 CLI로 정한다 (Orca 에이전트 ID → 실행 파일)
+        agents = [ag for ag, b in AGENT_BINS.items() if shutil.which(b)] or ["claude"]
     build_cmd = ans.get("build_cmd") or ("scripts/run/run.sh 'scripts/dev/build.sh'" if run_on else "scripts/dev/build.sh")
     test_cmd = ans.get("test_cmd") or ("scripts/run/run.sh 'scripts/dev/test.sh'" if run_on else "scripts/dev/test.sh")
     v = {
@@ -142,6 +150,7 @@ def build_vars(ans, today):
         "PROJECT_SUMMARY": ans.get("summary") or f"{ans['name']}을(를) 개발하는 저장소다. 모듈: "
         + ", ".join(f"{m['short']}({m['name']})" for m in mods) + ".",
         "DASHBOARD_URL": "http://127.0.0.1:8765/",
+        "ROUTING_AGENTS": yaml_inline(agents),
     }
     # 문서 폴더 표
     rows = []
@@ -298,7 +307,7 @@ def load_answers(a):
     if a.answers:
         ans.update(yaml.safe_load(Path(a.answers).read_text(encoding="utf-8")) or {})
     for k in ("name", "slug", "review_preset", "remote", "profile", "build_cmd", "test_cmd", "image",
-              "restricted", "summary", "commit_email", "team_name", "main_branch", "git_remote", "protected"):
+              "restricted", "summary", "commit_email", "team_name", "main_branch", "git_remote", "protected", "agents"):
         val = getattr(a, k, None)
         if val is not None:
             ans[k] = val
@@ -653,6 +662,7 @@ def main(argv=None):
     pi.add_argument("--git-remote", dest="git_remote",
                     help="브랜치를 올릴 git 원격 (기본 origin). 빈 값('')이면 로컬 전용 운영(원격 push가 배포를 일으키는 저장소)")
     pi.add_argument("--protected", help="원격 push에 승인이 필요한 브랜치 (쉼표, 예: main)")
+    pi.add_argument("--agents", help="모델 자동 라우팅에 쓸 구독(Orca 에이전트 ID, 쉼표: claude,codex,antigravity,grok). 기본: 설치된 CLI")
     pi.add_argument("--date", help="설치일 YYYY-MM-DD (기본 오늘)")
     pi.add_argument("--force", action="store_true"), pi.add_argument("--dry-run", action="store_true")
     pb = sub.add_parser("bootstrap", help="Orca 단계 실행")

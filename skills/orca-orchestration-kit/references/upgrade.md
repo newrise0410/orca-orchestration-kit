@@ -15,5 +15,6 @@
 3. **diff를 사용자에게 요약해 보여 주고 확인을 받는다.** 확인 없이 `--apply`하지 않는다. 덮어쓰기(`--overwrite-conflicts`)는 사용자가 원할 때만.
 4. 확인되면 `--apply`. `.kit-new`가 생기면 매니저에게 합치기를 지시한다.
    - 프로젝트가 키트 파일에 넣었던 규칙은 이번에 덧붙임 파일로 옮기면 다음부터 충돌하지 않는다: 명세 템플릿 → `orchestration/templates/<이름>.local.md`, 매니저 → `orchestration/sessions/MANAGER.local.md`(구조 문서 `orchestration/README.md` 9장).
+   - v0.4의 모델 자동 라우팅: `orchestration/models.yaml`(seed)은 새 파일이라 만들어진다. 만들어지면 그때부터 `launch.sh`가 agent/model 없는 작업을 자동 라우팅한다. 원치 않으면 `routing.enabled: false`. 적용 뒤 `models.py discover`로 구독을 확인한다.
    - 새 kit.yaml 키(예: v0.3의 `project.git_remote`·`restricted`·`review`·`slots`)는 seed라 자동으로 안 들어간다. `--include-seed` diff를 보고 매니저가 손으로 넣는다. 로컬 전용으로 운영해 온 저장소는 `git_remote: ""`를 꼭 넣는다(없으면 기본값 origin으로 명세가 렌더링된다).
 5. 커밋은 매니저에게 지시한다: `[L0] orchestration kit v<버전> upgrade`. 매니저는 새 MANAGER.md를 다시 읽는다(상시 세션은 기동 때 읽은 판을 쓰고 있다).

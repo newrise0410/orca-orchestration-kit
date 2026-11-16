@@ -3,7 +3,7 @@
 매니저가 설계·코드 검토를 낼 때, 보고서를 반영할 때, 잘못 머지한 것을 되돌릴 때 따른다.
 
 ## 1. 내기
-- **구현 검토(작업 하나):** `orchestration/tools/launch.sh --review <ID>`. 명세는 `orchestration/templates/review-spec.md`로 렌더링되고(`specs/<ID>.review.md`), 보고서 브랜치는 `req/<ID>-RV`, **기준은 `{{MAIN_BRANCH}}`**, 대상은 그 작업 브랜치다. 차수는 `--suffix r2`. 모델은 kit.yaml `review`(구현과 다른 제공자를 권한다).
+- **구현 검토(작업 하나):** `orchestration/tools/launch.sh --review <ID>`. 명세는 `orchestration/templates/review-spec.md`로 렌더링되고(`specs/<ID>.review.md`), 보고서 브랜치는 `req/<ID>-RV`, **기준은 `{{MAIN_BRANCH}}`**, 대상은 그 작업 브랜치다. 차수는 `--suffix r2`. 모델은 kit.yaml `review`를 비워 두면 라우팅이 구현한 구독과 다른 쪽을 고른다(`routing.cross_review`).
 - **설계 검토·범위 검토(독립 작업):** tasks.yaml 항목에 `spec_template: review-spec.md`, `target: <검토 대상 브랜치나 커밋>`, `branch: req/<검토ID>`, `base: {{MAIN_BRANCH}}`, `write_scope: [docs/06_evidence/<검토ID>/]`을 주고 `launch.sh <검토ID>`.
 - 검토 대상 위에 보고서를 커밋하게 하지 않는다(보고서 브랜치가 대상에서 갈라지면 반영할 때 검토가 막은 코드까지 들어온다).
 - 다음 검토에는 지난 지적의 해소 판정 표를 요구한다. 검토 범위·항목은 명세(acceptance 또는 `specs/<ID>.review.extra.md`)에 처음부터 넣는다.
@@ -11,6 +11,7 @@
 ## 2. 반영
 - **보고서는 경로만 가져온다:** `git checkout {{REF}}req/<검토ID> -- docs/06_evidence/<검토ID>/` → `[G]` 커밋.
 - 브랜치를 머지해야 하면 `merge-gate.md` 2의 범위 확인(허용 경로 `docs/06_evidence/<검토ID>/`)을 통과할 때만 한다.
+- **판정을 모델 실적에 남긴다:** `python3 orchestration/tools/models.py feedback <ID> pass|minor|major|fail --note '<한 줄>'` (H 없음·M만 = minor, H 있음 = major, 다시 짜야 함 = fail). 라우터가 그 작업을 맡았던 모델 점수에 반영한다.
 - 지적이 남으면 `<지적.md>`에 정리해 `launch.sh --retry <지적.md> --suffix r1 <ID>`로 구현 작업에 다시 낸다(그 작업 브랜치에서 분기).
 
 ## 3. 판정 기준

@@ -17,8 +17,14 @@
 #                 runtime.<이름>이 false면 <이름>.pending.md(있을 때)를 대신 넣는다 → '모의로 먼저, 실제로 다시'
 #  - status:      todo / ready / running / review / merged (투입 running → 증적 review → 머지 merged)
 #  - hold:        (선택) 일부러 미루는 사유. 있으면 투입 가능·할당 누락 판정에서 빠지고 launch.sh가 거부한다(예: "마스터 승인 대기")
-#  - agent/model/effort: (선택) 이 작업을 띄울 Orca 에이전트(claude, codex …)·모델 ID·추론 수준. effort는 model이 있어야 한다
-#                 없으면 kit.yaml orca.agent와 에이전트 기본 모델. launch.sh --agent/--model/--effort가 이번만 덮어쓴다
+#  - 모델 선택: 보통은 비워 둔다. launch.sh가 orchestration/models.yaml 정책으로 자동 라우팅한다
+#                 (난이도·태그 분류 → 구독·모델·effort 점수 → 실적 학습. 미리보기: models.py route <ID>)
+#    difficulty:  (선택) easy / normal / hard / critical 또는 1~5. 자동 분류가 틀릴 때만 준다
+#    tags:        (선택) 라우팅 힌트 [frontend, test, docs, refactor, debug, design, contract, config, research, coding]
+#    objective:   (선택) 이 작업만 quality / balanced / economy / speed
+#    route:       (선택) 카탈로그 키로 고정 (예: claude-opus, codex-sol). effort는 난이도로 정한다
+#    agent/model/effort: (선택) Orca 에이전트(claude, codex, antigravity, grok)·모델 ID·추론 수준을 직접 고정.
+#                 effort는 model이 있어야 한다. launch.sh --agent/--model/--effort가 이번만 덮어쓴다
 #  - spec_template: (선택) 명세 템플릿 파일 이름. 없으면 kit.yaml spec_templates[layer]
 #                 검토 작업은 review-spec.md: layer L0, branch req/<검토ID>, base는 메인 브랜치(검토 대상 아님),
 #                 target: <검토 대상 브랜치나 커밋>, write_scope: [docs/06_evidence/<검토ID>/]

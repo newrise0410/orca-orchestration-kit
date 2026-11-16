@@ -38,9 +38,12 @@
 |---|---|
 | 현황·투입 가능·메일함 미처리 | `python3 orchestration/tools/status.py` (정지 점검만: `--stall`) |
 | 투입 | `orchestration/tools/launch.sh <ID>...` — 선행 merged·status·기준 브랜치를 확인하고 렌더링 → task-create → worker-start → running |
-| 구현 검토 투입 | `launch.sh --review <ID>` (보고서 브랜치 `req/<ID>-RV`, 기준 {{MAIN_BRANCH}}, 모델은 kit.yaml `review`) |
+| 구현 검토 투입 | `launch.sh --review <ID>` (보고서 브랜치 `req/<ID>-RV`, 기준 {{MAIN_BRANCH}}. 모델은 kit.yaml `review`, 비우면 라우팅이 구현과 다른 구독으로 고른다) |
 | 남은 지적 재투입 | `launch.sh --retry <지적.md> --suffix r1 <ID>` (`req/<ID>`에서 분기, 지적만 고친다) |
-| 이번만 모델 바꾸기 | `launch.sh --agent codex --model <id> --effort high <ID>` (기본은 작업 항목의 `agent/model/effort`) |
+| 모델 라우팅 미리보기 | `python3 orchestration/tools/models.py plan` (투입 가능 전체) · `route <ID>` (근거·다음 후보) · `discover` (쓸 수 있는 구독·모델) |
+| 모델 실적·사용량 | `models.py stats` (모델별 결과 점수, 구독별 오늘·7일 사용량) |
+| 사용량 한도에 걸린 구독 | `models.py cooldown <codex\|claude\|antigravity\|grok> --min 120 --reason '한도'` → 그 작업을 다시 `launch.sh`(다른 구독으로 간다) |
+| 이번만 모델 바꾸기 | `launch.sh --agent codex --model <id> --effort high <ID>` (작업에 고정: 항목에 `route: <카탈로그 키>`) |
 | status 갱신 | `python3 orchestration/tools/task_status.py <ID> review\|merged` |
 | DAG 검증 | `python3 orchestration/tools/validate_dag.py` — 오류 0이어야 커밋 |
 | 일부러 미루는 작업 | tasks.yaml 항목에 `hold: <사유>` (투입 가능·할당 누락 판정에서 빠진다) |
@@ -60,6 +63,10 @@
   - 범위를 넓히거나 끝난 작업 뒤에 생긴 일은 **tasks.yaml 항목·명세를 만들어 새 작업으로 낸다**(`launch.sh <새 ID>`, 지적 수정은 `--retry`). 정본·대시보드·정리 도구가 tasks.yaml을 기준으로 한다.
   - send는 짧은 정보(경로 정정, 참고 사실)에만 쓰고 receipt를 확인한다. **워커 터미널에 직접 입력하지 않는다**(미제출 초안으로 남아 양쪽이 서로를 기다린 사례).
   - 정리·해제 전에 `worker-show`로 그 워커에 남은 후속 디스패치가 없는지 본다. 상시 워커는 지시마다 디스패치가 새로 생기므로 보내기 전에 `worker-list`로 최신 디스패치를 확인한다.
+- **모델은 라우팅에 맡긴다.** `launch.sh`가 작업마다 난이도·태그를 분류해 구독·모델·effort를 고른다(`orchestration/models.yaml`). 투입 출력의 `라우팅:` 줄을 본다.
+  - 분류가 틀린 작업만 tasks.yaml에 `difficulty: easy|normal|hard|critical`(또는 `tags`)을 적는다. 모델을 손으로 고정(`route:`·`agent/model`)하는 것은 이유가 있을 때만(예: 특정 모델만 아는 도구).
+  - 워커가 사용량 한도(usage limit, rate limit, quota)로 멈추거나 실패하면 그 구독을 `models.py cooldown`으로 빼고 다시 낸다. 실패한 작업은 다음 투입 때 난이도를 올리고 실패한 모델을 피한다.
+  - 검토 판정은 실적에 반영한다: `models.py feedback <ID> pass|minor|major|fail`(`procedures/review.md` 2). 웨이브가 끝나면 `models.py stats`를 보고 맞지 않는 점수는 `models.yaml models:`에서 고친다.
 - **결함 수정과 새 기능을 한 작업에 섞지 않는다(L-10).** 수정 → 머지 → 검토를 먼저 끝내고 새 기능은 별도 작업으로 낸다.
 - **대형 구현은 미리 쪼갠다(L-13).** 한 세션이 소화하는 양은 경험상 4묶음 안팎이다. 크면 차수(`<ID>a`, `<ID>b`)로 낸다. '부분 완료' 보고가 오면 남은 목록으로 다음 차수를 낸다.
 - **통합 세션의 머지 거부를 존중한다.** L1이 스모크 실패로 되돌리면 원인을 붙여 req 워커에 보완을 낸다(`--retry`).

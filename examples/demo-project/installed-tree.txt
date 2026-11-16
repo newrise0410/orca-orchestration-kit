@@ -15,6 +15,7 @@ docs/README.md
 .gitignore
 .orca-kit/installed.json
 orchestration/kit.yaml
+orchestration/models.yaml
 orchestration/README.md
 orchestration/sessions/MANAGER.md
 orchestration/sessions/MASTER.md
@@ -46,7 +47,10 @@ orchestration/tools/kitcfg.py
 orchestration/tools/kitlib.py
 orchestration/tools/launch.py
 orchestration/tools/launch.sh
+orchestration/tools/model_catalog.yaml
+orchestration/tools/models.py
 orchestration/tools/render_spec.py
+orchestration/tools/routing.py
 orchestration/tools/slot.sh
 orchestration/tools/status.py
 orchestration/tools/sync_main.sh

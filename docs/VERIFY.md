@@ -105,3 +105,17 @@ kit.py bootstrap --target <tmp>/empty --dry-run
 | 반입 검사 | 추가·변경 파일 전체에서 실사용 프로젝트 이름·호스트·계정·이메일·Run/dispatch/terminal ID·사설 주소 패턴 | 0건(시험 픽스처의 가짜 경로 `/home/someone/` 1건은 의도) |
 
 **하지 않은 것:** Orca 실기동(워커 생성, 실행 중·끝난 워커에 send 했을 때의 의미 재확인). dry-run과 Orca 1.4.255 CLI 도움말·오케스트레이션 가이드 대조만 했다. 실사용 프로젝트에 upgrade를 실제로 적용하지 않았다(사용자 결정).
+
+## 9. v0.4.0 검증: 모델 자동 라우팅 (2026-11-16)
+출력은 세션 임시 폴더에만 썼다. 실사용 프로젝트는 `git clone`한 복제본으로만 돌렸고, 원본 저장소의 `git status`가 비어 있음을 확인했다.
+
+| 항목 | 명령·방법 | 결과 |
+|---|---|---|
+| Orca 연동 근거 | Orca 1.4.259 `worker-start --help`, `agent hooks status`, `agent-context --json` | `--agent`가 claude·codex·antigravity·grok 등을 받고, `--model`은 Claude·Codex·Antigravity·Grok 모델 ID를 받는다(`--effort`는 `--model`이 있어야 한다). OpenCode는 쓰지 않는다 |
+| 구독 CLI 모델 목록 | `codex debug models`(JSON), `agy models`(탭 구분), `grok models`, Claude는 별칭(`--model fable/opus/sonnet`) | 이 머신에서 `models.py discover`: codex 10, antigravity 6, grok 4, 카탈로그 12개 모두 ✓, 카탈로그에 없는 모델 알림(구 세대 등). 4.1초(이후 하루 캐시) |
+| 회귀 시험 | `tests/smoke.sh` — 기존 48 + 라우팅 20(구독 CLI 대역으로 이 머신과 분리): discover·새 모델 알림·캐시 gitignore, 체계 통합 품질 4 이상, 쉬운 작업 저가 모델, 근거 출력, `difficulty` 검증 경고, `route:` 고정, launch 연결·`--no-route`·`--explain`, agy 모델 ID 변형, 교차 검토, 실패 이력(난이도 올림·실패 모델 회피), 쿨다운, 동시 상한, `routing.agents`, 학습 점수(merged·retry·재투입·검토 판정), feedback·stats, Orca 사용량 집계, status.py | **68/68 통과** |
+| 분류 보정(실사용 복제본, 작업 74개) | 모든 작업을 `routing.route`로 돌려 분포를 봤다 | 첫 판: 난이도 4~5가 80%, Opus 39건(분야 일상어 '계약'·'권한'·'성능'과 긴 완료 조건이 부풀림). 빈도 거르기(작업 30% 초과 단어 제외)·문턱 조정·balanced 가중 조정 뒤: 난이도 2:11 · 3:36 · 4:17 · 5:10, balanced 배분 codex 32 · claude 21 · antigravity 19 · grok 2(정적 평가라 동시 상한에 따른 분산은 빠져 있다). economy는 antigravity 44, quality는 claude 39 |
+| 예제 재생성 | `examples/demo-project/make_demo.sh <임시 폴더>` | 바뀐 결과물: installed-tree(+models.yaml·routing.py·models.py·model_catalog.yaml), 대시보드(생성 시각·커밋 해시) |
+| 반입 검사 | 추가·변경 파일 전체에서 실사용 프로젝트 이름·호스트·계정·이메일·Orca 계정 ID·홈 경로 | 0건 |
+
+**하지 않은 것:** 라우팅으로 Orca 워커를 실제로 띄우지 않았다(dry-run 명령까지만). 특히 Antigravity·Grok 워커를 Orca로 띄웠을 때 `--model` 값이 그대로 먹는지, Grok에 `--effort`가 먹는지는 실기동으로 확인해야 한다. 카탈로그 점수는 추정이고 실적이 쌓이기 전에는 보정되지 않는다.
