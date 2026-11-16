@@ -8,7 +8,10 @@
 옵션:
   --dry-run            Orca 명령을 실행하지 않고 출력만
   --force              선행 작업·status 확인을 건너뛴다(사유를 issues.md에 남겨라)
-  --agent/--model/--effort  이번 투입만 덮어쓴다 (기본: 작업 항목 agent/model/effort → kit.yaml orca.agent)
+  --agent/--model/--effort  이번 투입만 덮어쓴다
+                       (기본: 작업 항목 agent/model/effort 또는 route: <카탈로그 키> → 검토는 kit.yaml review.*
+                        → 모델 자동 라우팅(orchestration/models.yaml) → kit.yaml orca.agent)
+  --no-route           자동 라우팅을 끈다 · --explain  라우팅 근거와 다음 후보를 출력
   --worktree SEL       기본 new-top-level. 기존 워크트리(path:<경로>, id:<id>)를 재사용하면 생성 플래그를 넣지 않는다
   --keep-open          끝난 뒤에도 워커를 연다 (L1 통합 작업은 항상)
 설정(orchestration/kit.yaml): orca.work_run, orca.repo, orca.agent, review.{agent,model,effort}
@@ -30,6 +33,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import kitlib  # noqa: E402
 import render_spec  # noqa: E402
+import routing  # noqa: E402
+import status  # noqa: E402
 import task_status  # noqa: E402
 import validate_dag  # noqa: E402
 
@@ -69,6 +74,16 @@ def run(cmd, dry):
     return p.returncode, (p.stdout or "") + (("\n" + p.stderr) if p.stderr else "")
 
 
+def live_dispatches(run_id, dry):
+    """Orca가 진행 중이라고 보는 dispatch ID 집합. 조회할 수 없으면 None(라우터가 tasks.yaml로 어림한다)."""
+    if dry or not run_id or run_id.startswith("<"):
+        return None
+    ws, err = status.all_workers(run_id)
+    if err:
+        return None
+    return {w.get("dispatchId") for w in ws if str(w.get("state")) not in kitlib.SETTLED_WORKER_STATES}
+
+
 def first(pattern, text):
     m = re.search(pattern, text or "")
     return m.group(0) if m else ""
@@ -86,6 +101,8 @@ def main(argv=None):
     ap.add_argument("--agent"), ap.add_argument("--model"), ap.add_argument("--effort")
     ap.add_argument("--worktree", default=os.environ.get("KIT_WORKTREE") or "new-top-level")
     ap.add_argument("--keep-open", action="store_true")
+    ap.add_argument("--no-route", dest="no_route", action="store_true", help="자동 라우팅을 쓰지 않는다")
+    ap.add_argument("--explain", action="store_true", help="라우팅 근거와 다음 후보를 출력")
     a = ap.parse_args(argv)
     if a.retry and not a.suffix:
         sys.exit("--retry에는 --suffix(예: r1)가 필요하다")
@@ -108,6 +125,7 @@ def main(argv=None):
     active = {str(t["id"]) for t in data.get("tasks") or [] if isinstance(t, dict)}
     rv = cfg.get("review") or {}
     rc = 0
+    live, launched = None, {}
     for tid in a.ids:
         t = tasks.get(tid)
         print(f"\n[{tid}]")
@@ -158,15 +176,44 @@ def main(argv=None):
                 return 1
         spec = buf.getvalue().strip().splitlines()[-1]
         print(f"  명세: {spec}")
-        # ── 에이전트·모델
+        # ── 에이전트·모델: 명시 > 작업 항목 > review.* > 자동 라우팅 > orca.agent
         if mode == "review":
-            agent = a.agent or os.environ.get("KIT_REVIEW_AGENT") or rv.get("agent") or t.get("agent")
+            agent = a.agent or os.environ.get("KIT_REVIEW_AGENT") or rv.get("agent")
             model = a.model or os.environ.get("KIT_REVIEW_MODEL") or rv.get("model")
             effort = a.effort or os.environ.get("KIT_REVIEW_EFFORT") or rv.get("effort")
         else:
             agent = a.agent or os.environ.get("KIT_AGENT") or t.get("agent")
             model = a.model or t.get("model")
             effort = a.effort or t.get("effort")
+        rkey, rdiff = "", ""
+        catalog, pol = routing.load(repo)
+        pinned = t.get("route") if mode != "review" else None
+        if pinned and not (agent or model):
+            m = catalog["models"].get(str(pinned))
+            if m is None:
+                print(f"  보류: route: {pinned}는 카탈로그에 없다 (models.py discover)", file=sys.stderr)
+                rc = 1
+                continue
+            c = routing.classify(t, tasks, pol, mode)
+            e2, model, _ = routing.pick_effort(m, c["difficulty"], routing.rcfg(pol, "objective", "balanced"), float(m.get("quality", 3)))
+            agent, effort, rkey, rdiff = m.get("agent"), effort or e2, str(pinned), f"{c['difficulty']:.1f}"
+            print(f"  라우팅: route: {pinned} (작업 항목) → {agent} {model}" + (f" · {effort}" if effort else ""))
+        elif not (agent or model) and not a.no_route and routing.enabled(pol):
+            if live is None:
+                live = live_dispatches(run_id, a.dry_run)
+            dec = routing.route(repo, cfg, tid, tasks, mode, live_dids=live, catalog=catalog, pol=pol,
+                                extra_running=launched)
+            if dec.get("key"):
+                agent, model, effort = dec["agent"], dec["model"], effort or dec["effort"]
+                rkey, rdiff = dec["key"], f"{dec['difficulty']:.1f}"
+                print(f"  라우팅: {routing.describe(dec)}")
+                if a.explain:
+                    print("    난이도 근거: " + (" · ".join(dec["reasons"]) or "기본"))
+                    print(f"    선택 근거: 점수 {dec['score']} · " + " · ".join(dec["why"]))
+                    if dec["alts"]:
+                        print("    다음 후보: " + ", ".join(f"{k}({s})" for k, s in dec["alts"]))
+            else:
+                print(f"  라우팅: {routing.describe(dec)} → orca.agent 기본값으로 띄운다", file=sys.stderr)
         agent = agent or kitlib.cfg_get(cfg, "orca.agent", "claude") or "claude"
         if effort and not model:
             print("  참고: model 없이 effort는 쓸 수 없어 effort를 뺀다", file=sys.stderr)
@@ -194,9 +241,12 @@ def main(argv=None):
             return 1
         if a.dry_run:
             print(f"  (dry-run) dispatch.tsv 기록" + (", tasks.yaml status running" if mode == "new" else ""))
+            launched[agent] = launched.get(agent, 0) + 1
             continue
         with open(repo / "orchestration/state/dispatch.tsv", "a", encoding="utf-8") as f:
-            f.write("\t".join([title, otid, did, name, dt.datetime.now().strftime("%F %T")]) + "\n")
+            f.write("\t".join([title, otid, did, name, dt.datetime.now().strftime("%F %T"),
+                               agent, str(model or ""), str(effort or ""), rkey, rdiff]) + "\n")
+        launched[agent] = launched.get(agent, 0) + 1
         if mode == "new" and tid in active:
             tpath.write_text(task_status.set_status(tpath.read_text(encoding="utf-8"), tid, "running"), encoding="utf-8")
         print(f"  {title} {otid} {did}")

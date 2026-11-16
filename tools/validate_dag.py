@@ -154,8 +154,16 @@ def validate(text, cfg, archived=()):
             warnings.append(f"{tid}: kit.yaml modules에 없는 모듈 {mod!r}")
         if not str(t.get("acceptance") or "").strip():
             warnings.append(f"{tid}: acceptance 비어 있음")
-        if t.get("effort") and not t.get("model"):
+        if t.get("effort") and not t.get("model") and not t.get("route"):
             warnings.append(f"{tid}: effort는 model과 함께 줘야 한다(Orca --effort는 --model이 필요)")
+        dif = t.get("difficulty")
+        if dif is not None and str(dif).strip().lower() not in ("easy", "normal", "hard", "critical", "very-hard",
+                                                               "쉬움", "보통", "어려움", "1", "2", "3", "4", "5"):
+            warnings.append(f"{tid}: difficulty {dif!r}는 easy/normal/hard/critical 또는 1~5")
+        if t.get("objective") and str(t["objective"]) not in ("quality", "balanced", "economy", "speed"):
+            warnings.append(f"{tid}: objective {t['objective']!r}는 quality/balanced/economy/speed")
+        if t.get("route") and (t.get("agent") or t.get("model")):
+            warnings.append(f"{tid}: route와 agent/model을 같이 주면 agent/model이 이긴다")
         if layer == "L2" and t.get("base") and not str(t["base"]).startswith(int_prefix):
             warnings.append(f"{tid}: L2인데 base가 통합 브랜치({int_prefix}*)가 아님: {t['base']}")
     cycles = find_cycles(ids, {k: [d for d in v if d in idset] for k, v in deps.items()})

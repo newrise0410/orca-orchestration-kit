@@ -92,3 +92,34 @@
 11. **영문 템플릿:** 문서·명세 템플릿 영어판(언어 선택 `--lang`).
 12. **과정 기록 공개판 생성기:** 07_process에서 요구 문구·고객 정보·가격을 걸러 낸 공개용 판을 만드는 도구.
 13. **검증:** 키트 자체의 회귀 시험(`tests/`: init 배치, 렌더링, DAG 검증 사례, 대시보드 스냅샷 비교)과 CI. **→ v0.3 일부 반영** (`tests/smoke.sh`, CI는 보류)
+
+## 6. v0.4 반영: 모델 자동 라우팅 (2026-11-16)
+
+**요청:** 작업 난이도·속도에 맞는 모델과 effort를 자동으로 고르고, Claude 말고도 구독제 CLI(Codex OAuth, Antigravity `agy`, Grok CLI)를 Orca처럼 섞어 쓴다. 핵심은 '모델에 최적화된 자동 라우팅'.
+
+**실행 계층은 Orca가 이미 갖고 있다.** Orca 1.4의 `worker-start --agent <claude|codex|antigravity|grok …> --model <id> --effort <수준>`가 구독 CLI를 워크트리별로 띄운다(Conductor가 하는 일). OpenCode식 API 관문은 쓰지 않는다. 키트가 더하는 것은 **작업마다 무엇으로 띄울지 정하는 결정 계층**이다.
+
+### 6.1 구성
+| 부분 | 파일 | 소유 |
+|---|---|---|
+| 모델 카탈로그: 모델별 quality·speed·cost(1~5)·강점 태그·effort 목록(또는 `model_by_effort`) | `tools/model_catalog.yaml` | 키트(upgrade로 갱신) |
+| 정책: 쓸 구독, 목표(quality/balanced/economy/speed), 구독별 동시 상한, 교차 검토, 고정(pin)·선호(prefer)·최저 품질, 카탈로그 덮어쓰기, 분류 단어 | `orchestration/models.yaml` | 프로젝트(seed) |
+| 결정: 분류 → 점수 → 제외 → effort | `tools/routing.py` | 키트 |
+| 도구: discover / route / plan / stats / cooldown / feedback | `tools/models.py` | 키트 |
+| 연결: agent/model 없는 작업은 투입 때 라우팅, 결정 근거 한 줄, dispatch.tsv에 에이전트·모델·effort·키·난이도 | `tools/launch.py` | 키트 |
+
+### 6.2 결정 방법 (LLM을 부르지 않는다)
+1. **분류:** 기본 난이도 2에서 L1·체계 통합(4), 계약 작업(제목에 계약 말이 있거나 `contracts/`를 씀, +1) 또는 그 밖의 공통 기반 F-*(+0.5), 쓰기 범위 넓이(6곳 +0.5, 12곳 +1), 최상위 폴더 3개 이상(+0.5), 완료 조건 수(6개 +0.5, 12개 +1), 어려운 말(동시성·보안·마이그레이션 등 0.5씩 최대 +1. **프로젝트 작업의 30%보다 많이 나오는 말은 그 분야의 일상어로 보고 뺀다**), 제목의 쉬운 말(−1, 어려운 말이 없을 때), 성능 측정(+0.5), 선행 4개 이상(+0.5), 앞선 시도 실패(+1씩, 최대 +2). 작업 항목 `difficulty`가 있으면 그것을 쓴다. 태그(design·contract·frontend·test·docs·refactor·debug·config·research·coding·integration·review)는 제목·완료 조건·쓰기 범위에서 뽑는다. 뒤에 기대는 미완료 작업이 5개 이상이면 임계 경로(품질 여유 +0.5, 속도 가중 +0.3).
+   - 보정: 실사용 프로젝트 작업 74개로 돌려 맞췄다. 첫 판은 '계약'·'권한'·'성능'처럼 그 분야에 늘 나오는 말과 긴 완료 조건 때문에 난이도 4~5가 80%, Opus가 39건이었다. 빈도 거르기·문턱 조정 뒤 난이도 분포 2:11 · 3:36 · 4:17 · 5:10(`docs/VERIFY.md` 9장).
+2. **점수:** `−under×max(0, 난이도−quality) − cost가중×cost − speed가중×(5−speed) + head×min(1, quality−난이도) + 강점(태그당 0.75, 최대 1.5) + 실적 + prefer(+2)` − 진행 중 워커(0.4씩) − 하루 사용량 기준 초과 − 이 작업에서 실패한 모델(2.5) − 교차 검토 위반(3). 목표별 가중은 `routing.py OBJECTIVES`. 구독제라 cost는 돈이 아니라 한도 소모이고, 다시 띄우고 검토하는 비용이 더 크므로 balanced는 품질 여유(head 1.0)를 소모(0.4)보다 무겁게 둔다. 결과적으로 **난이도를 여유 있게 넘는 모델 가운데 싼 쪽**이 이기고, 실패·부하·한도가 쌓이면 다른 구독으로 넘어간다.
+3. **제외:** `routing.agents` 밖, CLI 없음, CLI 모델 목록에 없는 모델(Claude는 별칭이라 목록 확인 없이 믿는다), 쿨다운, 최저 품질 미달, 동시 상한(모두 차면 상한 무시).
+4. **effort:** 난이도 1~2 low, 3 medium, 4 high, 5 xhigh. 목표 quality면 한 단계 위, economy·speed면 아래. 모델이 난이도보다 2 이상 강하면 한 단계 아래. 임계 경로는 난이도 +0.5로 본다(강한 모델이라고 effort를 낮추지 않게). `max`는 명시할 때만. Antigravity Gemini처럼 추론 수준이 모델 ID에 든 모델은 ID 변형을 고른다.
+5. **학습:** 구현 투입마다 결과 점수를 매긴다. merged인데 뒤에 retry가 없으면 1, retry가 있으면 0.6, 다시 띄운 앞 시도와 todo로 되돌아온 시도는 0, retry 마지막은 1. 검토 판정(`models.py feedback`: pass 1 · minor 0.7 · major 0.3 · fail 0)이 있으면 그 점수로 덮는다. (모델, 난이도 대역)별 평균을 사전값 0.67로 평활해 `4×(평균−0.67)`을 더한다.
+
+### 6.3 판단과 한계
+- **결정적 점수 + 학습 보정을 택했다.** 투입마다 LLM으로 분류하면 느리고 비싸며 재현되지 않는다. 매니저는 분류가 틀린 작업에만 `difficulty`를 적는다. 판단이 필요한 몫은 매니저(LLM)가 tasks.yaml을 쓸 때 이미 들어간다.
+- **카탈로그 점수는 작성 시점의 추정이다**(2026-11 기준 Claude fable/opus/sonnet/haiku 별칭, Codex gpt-6-astra·gpt-6.1-sol·gpt-6.1-terra·gpt-6-luna, Antigravity gemini-3.8-flash·claude-opus-4-6, Grok grok-4.7·build-fast). `discover`가 카탈로그에 없는 새 모델을 알려 주고, 프로젝트는 `models.yaml models:`로 덮어쓴다.
+- **탐색(일부러 다른 모델에 맡겨 보기)은 하지 않는다.** 결과가 쌓이는 모델만 학습된다. 비교가 필요하면 `pin`·`prefer`로 잠시 바꾼다.
+- **구독 계정 전환은 하지 않는다.** `orca account select`는 호스트 전체 설정이라 동시 투입과 사용자 세션에 번진다. 한도는 구독 단위 쿨다운으로 다룬다. 한도 감지는 사람(매니저)이 워커 보고·화면으로 하고 `cooldown`을 건다(자동 감지는 다음 후보).
+- **Orca 사용량 파일**(`~/.config/orca/orca-{claude,codex}-usage.json`)은 Orca 내부 형식이다. 모델·날짜별 출력 토큰 합만 읽고, 형식이 바뀌면 조용히 빈 값으로 둔다. Antigravity·Grok은 집계가 없다.
+- **다음 후보:** 워커 화면에서 한도 문구를 찾아 쿨다운을 자동으로 거는 것(status.py), 작업 소요 시간(투입 → merged) 학습, 대시보드 모델 배분 탭.

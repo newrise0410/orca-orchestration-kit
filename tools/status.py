@@ -25,6 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import kitlib  # noqa: E402
+import routing  # noqa: E402
 import validate_dag  # noqa: E402
 
 
@@ -127,6 +128,20 @@ def collect(repo, cfg, a):
                                  "state": state, "liveness": w.get("liveness"), "attention": w.get("attention") or [],
                                  "workspace": wsp, "last_commit": last_commit(wsp) if wsp and Path(wsp).is_dir() else None})
     out["orca"] = o
+    # 모델 라우팅: 진행 중 워커의 구독·모델, 구독별 동시 상한, 쿨다운
+    try:
+        catalog, pol = routing.load(repo)
+        rows = {r["did"]: r for r in routing.read_dispatch(repo, set(tasks))}
+        by = {}
+        for w in o["workers"]:
+            r = rows.get(w["dispatch"]) or {}
+            w["model"] = (r.get("key") or r.get("model") or "") if r else ""
+            if r.get("agent"):
+                by[r["agent"]] = by.get(r["agent"], 0) + 1
+        out["models"] = {"enabled": routing.enabled(pol), "running": by,
+                         "caps": routing.rcfg(pol, "max_concurrent") or {}, "cooldowns": routing.read_cooldowns(repo)}
+    except Exception as e:  # noqa: BLE001 — 현황은 라우팅 설정이 깨져도 나와야 한다
+        out["models"] = {"error": str(e)[:160]}
     return out
 
 
@@ -185,7 +200,17 @@ def print_report(s, a):
         print(f"## 워커: 진행 {len(o['workers'])}" + (f" (끝남: {settled})" if settled else "") + (f" — 조회 실패: {o['error']}" if o["error"] else ""))
         for w in o["workers"]:
             att = f" · attention {', '.join(map(str, w['attention']))}" if w["attention"] else ""
-            print(f"- {w['kit_id'] or w['title'] or '?'} {w['dispatch']} {w['state']}/{w['liveness']} · 마지막 커밋 {ago(w['last_commit'])}{att}")
+            mdl = f" · {w['model']}" if w.get("model") else ""
+            print(f"- {w['kit_id'] or w['title'] or '?'} {w['dispatch']} {w['state']}/{w['liveness']}{mdl} · 마지막 커밋 {ago(w['last_commit'])}{att}")
+        md = s.get("models") or {}
+        if md.get("error"):
+            print(f"## 모델: 라우팅 설정 오류 ({md['error']})")
+        elif md.get("enabled") or md.get("running") or md.get("cooldowns"):
+            parts = [f"{ag} {md['running'].get(ag, 0)}/{cap}" for ag, cap in md["caps"].items()]
+            parts += [f"{ag} {n}" for ag, n in md["running"].items() if ag not in md["caps"]]
+            cd = [f"{k} {int((v['until'] - time.time()) // 60)}분" for k, v in md["cooldowns"].items()]
+            print("## 모델: 진행 " + (" · ".join(parts) or "0") + (f" · 쿨다운 {', '.join(cd)}" if cd else "")
+                  + ("" if md.get("enabled") else " (자동 라우팅 꺼짐)"))
     print("## 정지 점검")
     for ln in stall_lines(s, a.stale_min):
         print(f"- {ln}")

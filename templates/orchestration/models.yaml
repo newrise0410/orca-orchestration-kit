@@ -1,0 +1,39 @@
+# 모델 자동 라우팅 정책 (프로젝트 소유). 이 파일이 없으면 launch.sh는 라우팅을 쓰지 않는다.
+#
+# launch.sh는 작업에 agent/model이 없으면 여기 정책으로 (에이전트, 모델, effort)를 고른다.
+#   1) 작업 분류: 계층·쓰기 범위·완료 조건 수·어려운 말·성능 측정·선행 수 → 난이도 1~5와 태그
+#   2) 후보 점수: 능력 부족 벌점 + 구독 소모·느림 벌점(목표별 가중) + 강점 가점 + 실적(학습) − 부하
+#   3) 제외: 설치 안 된 CLI, 모델 목록에 없는 모델, 쿨다운, 동시 상한, min_quality
+# 확인: python3 orchestration/tools/models.py discover | plan | route <ID> | stats
+# 우선순위: launch.sh --agent/--model > 작업 항목 agent/model(route: <카탈로그 키>) > kit.yaml review.* (검토) > 이 라우팅 > kit.yaml orca.agent
+# 카탈로그(모델별 점수): orchestration/tools/model_catalog.yaml (키트 소유, upgrade로 갱신)
+
+routing:
+  enabled: true
+  objective: balanced          # quality | balanced | economy | speed  (작업 항목 objective:로 그 작업만 바꿀 수 있다)
+  agents: {{ROUTING_AGENTS}}   # 쓸 구독(Orca 에이전트 ID). claude, codex, antigravity, grok
+  exclude: []                  # 쓰지 않을 카탈로그 키 (예: [claude-fable])
+  max_concurrent:              # 구독별 동시 워커 상한 (한도 보호). 모두 차면 상한을 무시하고 가장 나은 쪽
+    claude: 4
+    codex: 4
+    antigravity: 2
+    grok: 2
+  cross_review: true           # 검토 워커는 구현한 구독과 다른 쪽을 우선 (같은 맹점을 덜 공유)
+  escalate_on_retry: true      # 앞선 시도가 실패한 작업은 난이도를 올리고 실패한 모델을 피한다
+  learn: true                  # 투입 결과(dispatch.tsv × tasks.yaml × 검토 판정)로 모델 점수를 보정
+  critical_dependents: 5       # 뒤에 기대는 미완료 작업이 이만큼이면 임계 경로: 능력 부족 벌점·속도 가중을 올린다
+  min_quality: {}              # 계층별 최저 품질 (예: {L1: 4})
+  prefer: {}                   # 태그별 선호 카탈로그 키 (+2점. 예: {frontend: agy-gemini-flash})
+  pin: {}                      # 고정 (예: {review: codex-sol, L1: claude-opus}). 쓸 수 없으면 무시
+  daily_soft_tokens: {}        # 하루 출력 토큰 기준(Orca 집계, 모든 프로젝트 합). 넘으면 벌점 (예: {claude: 2000000})
+
+# 카탈로그 덮어쓰기·추가 (같은 꼴, 키 단위 병합). 새 모델은 models.py discover의 '카탈로그에 없는 모델'에서 고른다.
+#   claude-opus: {cost: 3}
+#   codex-sol-fast: {agent: codex, model: gpt-6.1-sol, quality: 4, speed: 4, cost: 3, efforts: [low, medium], strengths: [coding]}
+models: {}
+
+# 작업 분류 단어 더하기 (기본 목록은 routing.py)
+classifier:
+  hard_words: []
+  easy_words: []
+  tag_words: {}                # 예: {frontend: [admin/, 화면설계]}

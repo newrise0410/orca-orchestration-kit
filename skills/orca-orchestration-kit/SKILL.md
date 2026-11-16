@@ -5,7 +5,7 @@ description: >-
   one session per requirement), task DAG waves, branch/merge rules, numbered docs, dashboard and
   optional isolated execution. Use when the user says "새 프로젝트를 오케스트레이션으로 시작",
   "orchestration kit init", "3계층 세션으로 개발", "오케스트레이션 키트 설치/업그레이드",
-  "키트 현황", "메일함 확인하고 현황 요약", "멈췄나", "정지 점검", "매니저 상태 봐줘",
+  "키트 현황", "메일함 확인하고 현황 요약", "모델 배분", "구독 사용량", "멈췄나", "정지 점검", "매니저 상태 봐줘",
   "마스터 세션 이어받기", or asks to apply this kit to a repository.
 ---
 
@@ -30,7 +30,8 @@ AI 다중 세션 개발 워크플로를 저장소에 깔고 운영한다. 키트
 2. 사용자에게 요약한다: **결정이 필요한 것을 맨 위에**(사용자 결정 대기 질문, escalation, 실패), 그다음 정지 점검 의심 줄과 이유, 웨이브별 진행·다음 이정표. 사소한 진행은 뺀다.
 3. 매니저 질문 중 사용자 결정이 아닌 것은 바로 답한다: `orca orchestration reply --id <메시지 ID> --body '<답>'`.
 4. 정지 점검에 의심 줄(할당 누락·커밋 없음·attention·running 고아)이 있으면 매니저에게 이유와 조치를 한 줄로 보고하게 지시한다(`send --to run:<작업 Run>`). 사람 승인이 필요한 것만 사용자에게 올린다.
-5. 키트 새 버전 알림이 있으면 사용자에게 upgrade를 권한다(적용은 사용자 확인 뒤).
+5. 사용자가 모델 배분·구독 사용량을 물으면 `python3 <대상>/orchestration/tools/models.py stats`(실적·사용량)와 `plan`(다음 배분)을 요약한다. 한도에 걸린 구독은 매니저에게 `models.py cooldown`을 지시한다.
+6. 키트 새 버전 알림이 있으면 사용자에게 upgrade를 권한다(적용은 사용자 확인 뒤).
 
 ## 이어받기
 이전 마스터 세션이 끝났거나 다른 터미널에서 마스터를 이어 할 때:
@@ -48,4 +49,6 @@ AI 다중 세션 개발 워크플로를 저장소에 깔고 운영한다. 키트
 ## 연계 (선택)
 요구사항 세션 안에서 `claude-codex-workflow` 플러그인(Claude 기획 → Codex 구현 → Claude 검수)을 쓸 수 있다.
 설치돼 있으면 `orchestration/templates/worker-spec.local.md`에 "구현은 `/plan-and-build`로 진행해도 된다"를 넣는다(모든 L2 명세의 '종료' 앞에 붙는다).
-키트는 이 플러그인에 의존하지 않는다. 작업마다 다른 모델을 쓰려면 tasks.yaml 항목에 `agent`·`model`·`effort`를 준다.
+키트는 이 플러그인에 의존하지 않는다.
+
+**모델 자동 라우팅:** `launch.sh`가 작업마다 구독(Claude·Codex·Antigravity·Grok CLI)·모델·effort를 고른다. 정책은 대상의 `orchestration/models.yaml`, 모델 점수는 `orchestration/tools/model_catalog.yaml`이다. 손으로 고정하려면 tasks.yaml 항목에 `route: <카탈로그 키>` 또는 `agent`·`model`·`effort`를 준다.

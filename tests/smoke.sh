@@ -6,6 +6,25 @@ KITSRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 W="${1:-$(mktemp -d)}"; mkdir -p "$W"
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=dev@t.invalid GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=dev@t.invalid
 export ORCA_CLI_COMMAND="$W/no-orca"; printf '#!/bin/sh\necho "{\\"ok\\":false}"; exit 1\n' > "$ORCA_CLI_COMMAND"; chmod +x "$ORCA_CLI_COMMAND"
+# 구독 CLI 대역(모델 목록만 답한다) — 라우팅 시험을 이 머신의 실제 구독과 떼어 놓는다
+B="$W/bin"; mkdir -p "$B"
+cat > "$B/claude" <<'SH'
+#!/bin/sh
+exit 0
+SH
+cat > "$B/codex" <<'SH'
+#!/bin/sh
+echo '{"models":[{"slug":"gpt-6-astra"},{"slug":"gpt-6.1-sol"},{"slug":"gpt-6.1-terra"},{"slug":"gpt-6-luna"},{"slug":"gpt-9-new"}]}'
+SH
+cat > "$B/agy" <<'SH'
+#!/bin/sh
+printf 'gemini-3.8-flash-low\tL\ngemini-3.8-flash-medium\tM\ngemini-3.8-flash-high\tH\nclaude-opus-4-6-thinking\tO\n'
+SH
+cat > "$B/grok" <<'SH'
+#!/bin/sh
+echo "Available models:"; echo "  * grok-4.7 (default)"; echo "  - grok-4.7-build-fast"
+SH
+chmod +x "$B"/*; export PATH="$B:$PATH" KIT_ORCA_HOME="$W/orca-home"
 pass=0; fail=0
 ok()  { pass=$((pass+1)); echo "  ok   $1"; }
 bad() { fail=$((fail+1)); echo "  FAIL $1"; }
@@ -125,6 +144,92 @@ $KIT upgrade --target "$U" --apply --summary >/dev/null 2>&1
 check "병합 결과에 양쪽 변경" bash -c "head -1 $U/orchestration/templates/worker-spec.md | grep -q '키트 새 판' && grep -q '프로젝트 끝줄' $U/orchestration/templates/worker-spec.md"
 check "키트 밖 파일은 보존 + .kit-new" bash -c "grep -q '프로젝트 파일' $U/orchestration/templates/review-spec.md && test -f $U/orchestration/templates/review-spec.md.kit-new"
 check "다시 미리보기: 남은 건 키트 밖 파일뿐" bash -c "$KIT upgrade --target $U --summary | grep -c '^===' | grep -qx 1"
+
+echo "[10] 모델 자동 라우팅"
+cd "$R"
+M="python3 $T/models.py"
+first() { head -1 <<<"$1"; }
+o=$($M discover 2>&1)
+check "discover: CLI 모델 목록 읽음" bash -c 'grep -q "codex: 모델 5개" <<<"$0" && grep -q "✓ codex-sol" <<<"$0"' "$o"
+check "discover: 카탈로그에 없는 모델 알림" has "$o" "gpt-9-new"
+check "캐시는 .gitignore" grep -q 'models_cache.json' .gitignore
+o=$($M route S-01 2>&1)
+check "체계 통합(S-01)은 품질 4 이상" bash -c 'grep -Eq "^\[S-01\] (claude-opus|claude-fable|codex-astra|claude-sonnet|codex-sol|grok|agy-claude-opus) " <<<"$0"' "$o"
+cat >> orchestration/tasks.yaml <<'YAML'
+
+- id: X-DOC
+  title: README 오타 수정
+  layer: L2
+  module: api
+  branch: req/X-DOC
+  base: int/api
+  deps: []
+  write_scope: [README.md]
+  acceptance: "README의 오타를 고친다"
+  status: todo
+- id: X-PIN
+  title: 고정 라우팅
+  layer: L2
+  module: api
+  branch: req/X-PIN
+  base: int/api
+  deps: []
+  write_scope: [api/pin/]
+  acceptance: "고정한 모델로 띄운다"
+  route: codex-sol
+  difficulty: hardest
+  status: todo
+YAML
+o=$($M route X-DOC 2>&1)
+check "쉬운 작업은 저가 모델(cost 1)" bash -c 'grep -Eq "^\[X-DOC\] (claude-haiku|codex-luna|agy-gemini-flash|grok-fast) " <<<"$0"' "$o"
+check "근거 출력(난이도·선택·다음 후보)" bash -c 'grep -q "난이도 근거" <<<"$0" && grep -q "다음 후보" <<<"$0"' "$o"
+check "validate_dag: 잘못된 difficulty 경고" bash -c "python3 $T/validate_dag.py 2>&1 | grep -q 'X-PIN: difficulty'"
+o=$(KIT_RUN=run_x $T/launch.sh --dry-run X-PIN 2>&1)
+check "route: 고정 → codex gpt-6.1-sol" bash -c 'grep -q "route: codex-sol" <<<"$0" && grep -q -- "--agent codex --model gpt-6.1-sol" <<<"$0"' "$o"
+o=$(KIT_RUN=run_x $T/launch.sh --dry-run --explain X-DOC 2>&1)
+check "launch: 라우팅 결과로 --agent/--model" bash -c 'grep -q "라우팅: " <<<"$0" && grep -q "선택 근거" <<<"$0" && grep -Eq -- "--agent (claude|codex|antigravity|grok) --model" <<<"$0"' "$o"
+o=$(KIT_RUN=run_x $T/launch.sh --dry-run --no-route X-DOC 2>&1)
+check "--no-route: orca.agent 기본값" bash -c '! grep -q "라우팅" <<<"$0" && grep -q -- "--agent claude --worktree" <<<"$0"' "$o"
+check "agy는 effort 대신 모델 ID 변형" python3 -c "
+import sys; sys.path.insert(0,'$T'); import routing
+m={'agent':'antigravity','model':'g-m','model_by_effort':{'low':'g-l','medium':'g-m','high':'g-h'}}
+e,mid,_=routing.pick_effort(m,4.6,'balanced',3); assert e is None and mid=='g-h', (e,mid)"
+# 교차 검토: F-03을 claude가 구현했다고 기록
+printf 'F-03\ttask_1\tctx_1\tf-03\t2026-01-01 10:00:00\tclaude\tsonnet\thigh\tclaude-sonnet\t3.5\n' >> orchestration/state/dispatch.tsv
+o=$($M route --review F-03 2>&1)
+check "교차 검토: 구현(claude)과 다른 구독" bash -c 'l=$(head -1 <<<"$0"); grep -q "→ " <<<"$l" && ! grep -q "→ claude " <<<"$l"' "$o"
+# 실패 이력: S-01을 claude-opus로 띄웠는데 todo로 되돌아왔다
+printf 'S-01\ttask_2\tctx_2\ts-01\t2026-01-01 11:00:00\tclaude\topus\thigh\tclaude-opus\t4.0\n' >> orchestration/state/dispatch.tsv
+o=$($M route S-01 2>&1)
+check "실패 이력: 난이도 올림 + 실패 모델 피함" bash -c 'grep -q "앞선 시도 실패 1회" <<<"$0" && ! grep -q "^\[S-01\] claude-opus " <<<"$0"' "$o"
+$M cooldown claude --min 30 --reason '사용량 한도' >/dev/null
+o=$($M route F-01 2>&1)
+check "쿨다운 구독은 제외" bash -c '! grep -q "^\[F-01\] claude-" <<<"$0" && grep -q "쿨다운" <<<"$0"' "$o"
+$M cooldown --clear claude >/dev/null
+sed -i 's/^    codex: 4$/    codex: 0/' orchestration/models.yaml
+o=$($M route --review F-03 2>&1)
+check "동시 상한이 찬 구독은 제외" bash -c '! head -1 <<<"$0" | grep -q "→ codex " && grep -q "동시 상한" <<<"$0"' "$o"
+sed -i 's/^    codex: 0$/    codex: 4/' orchestration/models.yaml
+sed -i 's/^  agents: .*/  agents: [codex]/' orchestration/models.yaml
+o=$($M route F-01 2>&1)
+check "routing.agents 밖 구독은 안 씀" bash -c 'grep -q "^\[F-01\] codex-" <<<"$0"' "$o"
+check "학습: merged·retry·재투입·검토 판정 점수" python3 -c "
+import sys; sys.path.insert(0,'$T'); import routing
+rows=[dict(kit_id='A',mode='new',ts='1',agent='claude',model='opus',key='claude-opus',difficulty='4',did='d1'),
+      dict(kit_id='A',mode='new',ts='2',agent='codex',model='gpt-6.1-sol',key='',difficulty='4',did='d2'),
+      dict(kit_id='A',mode='retry',ts='3',agent='codex',model='gpt-6.1-sol',key='codex-sol',difficulty='3',did='d3')]
+cat,_=routing.load('.')
+o={r['did']:r['score'] for r in routing.outcomes(rows,{'A':{'status':'merged'}},[],cat['models'])}
+assert o=={'d1':0.0,'d2':0.6,'d3':1.0}, o
+o={r['did']:r['score'] for r in routing.outcomes(rows,{'A':{'status':'merged'}},[{'kit_id':'A','ts':'2.5','score':0.3}],cat['models'])}
+assert o['d2']==0.3, o"
+$M feedback F-03 minor --note '경계값 누락' >/dev/null
+o=$($M stats 2>&1)
+check "stats: 실적 표 · 검토 판정 기록" bash -c 'grep -q "claude-sonnet" <<<"$0" && grep -q "F-03" orchestration/state/route_feedback.tsv' "$o"
+mkdir -p "$KIT_ORCA_HOME"; printf '{"dailyAggregates":[{"day":"%s","model":"claude-opus-5-5","outputTokens":3000000}]}' "$(date +%F)" > "$KIT_ORCA_HOME/orca-claude-usage.json"
+o=$($M stats 2>&1)
+check "stats: Orca 사용량(오늘 출력 토큰)" has "$o" "claude: 오늘 3000k"
+o=$(python3 $T/status.py --no-orca 2>&1); check "status.py --no-orca (라우팅 포함 설치본)" test -n "$o"
 
 echo
 echo "결과: 통과 $pass · 실패 $fail  (작업 폴더 $W)"

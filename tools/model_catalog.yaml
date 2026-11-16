@@ -1,0 +1,123 @@
+# 키트 기본 모델 카탈로그 (키트 소유: upgrade로 갱신된다). 프로젝트 조정은 orchestration/models.yaml.
+#
+# 점수는 1~5 상대값이다(소수 가능).
+#   quality  어려운 작업을 한 번에 끝낼 기대
+#   speed    끝나는 빠르기
+#   cost     구독 한도 소모(높을수록 아껴 쓴다)
+# strengths: 이 태그가 붙은 작업에서 가점. 태그는 routing.py TAG_WORDS
+#            (design contract integration coding refactor debug test frontend docs config research review).
+# efforts:   Orca --effort로 줄 수 있는 값. 비우면 effort를 주지 않는다.
+# model_by_effort: 추론 수준이 모델 ID에 들어 있는 경우(effort 대신 ID를 고른다).
+# 점수는 키트 작성 시점의 판단이다. 투입 결과가 쌓이면 학습 보정이 덧붙고(models.py stats),
+# 맞지 않으면 models.yaml models:에서 키 단위로 덮어쓴다.
+version: "2026-11"
+
+# 에이전트 = 구독. Orca --agent ID → 실행 파일과 모델 목록 조회 방법
+agents:
+  claude:      {bin: claude, list: none}    # Claude 구독(Claude Code). 별칭(fable/opus/sonnet/haiku)은 최신 판을 따른다
+  codex:       {bin: codex,  list: codex}   # ChatGPT 구독(Codex OAuth)
+  antigravity: {bin: agy,    list: agy}     # Google 구독(Antigravity CLI)
+  grok:        {bin: grok,   list: grok}    # xAI 구독(Grok CLI)
+
+models:
+  # ── Claude
+  claude-fable:
+    agent: claude
+    model: fable
+    quality: 5
+    speed: 1
+    cost: 5
+    efforts: [low, medium, high, xhigh, max]
+    strengths: [design, contract, integration, review]
+  claude-opus:
+    agent: claude
+    model: opus
+    quality: 5
+    speed: 2
+    cost: 4
+    efforts: [low, medium, high, xhigh, max]
+    strengths: [design, contract, integration, review, docs]
+  claude-sonnet:
+    agent: claude
+    model: sonnet
+    quality: 4
+    speed: 3
+    cost: 3
+    efforts: [low, medium, high, xhigh, max]
+    strengths: [coding, frontend, test, docs]
+  claude-haiku:
+    agent: claude
+    model: haiku
+    quality: 2
+    speed: 5
+    cost: 1
+    efforts: []
+    strengths: [docs, config]
+  # ── Codex (ChatGPT)
+  codex-astra:
+    agent: codex
+    model: gpt-6-astra
+    quality: 5
+    speed: 2
+    cost: 4
+    efforts: [low, medium, high, xhigh, max]
+    strengths: [coding, debug, refactor, design]
+  codex-sol:
+    agent: codex
+    model: gpt-6.1-sol
+    quality: 4
+    speed: 3
+    cost: 2
+    efforts: [low, medium, high, xhigh, max]
+    strengths: [coding, refactor, debug, test, review]
+  codex-terra:
+    agent: codex
+    model: gpt-6.1-terra
+    quality: 3
+    speed: 4
+    cost: 2
+    efforts: [low, medium, high, xhigh, max]
+    strengths: [coding, test, config]
+  codex-luna:
+    agent: codex
+    model: gpt-6-luna
+    quality: 2
+    speed: 5
+    cost: 1
+    efforts: [low, medium, high, xhigh, max]
+    strengths: [config, docs]
+  # ── Antigravity (Google)
+  agy-gemini-flash:
+    agent: antigravity
+    model: gemini-3.8-flash-medium
+    model_by_effort: {low: gemini-3.8-flash-low, medium: gemini-3.8-flash-medium, high: gemini-3.8-flash-high}
+    quality: 3
+    speed: 5
+    cost: 1
+    efforts: []
+    strengths: [frontend, docs, research]
+  agy-claude-opus:          # 다른 구독 한도로 Claude 계열을 쓰는 대체 경로
+    agent: antigravity
+    model: claude-opus-4-6-thinking
+    quality: 4
+    speed: 2
+    cost: 2
+    efforts: []
+    strengths: [design, review]
+  # ── Grok (xAI)
+  grok:
+    agent: grok
+    model: grok-4.7
+    quality: 4
+    speed: 3
+    cost: 2
+    efforts: [low, medium, high]
+    strengths: [coding, research]
+  grok-fast:
+    agent: grok
+    model: grok-4.7-build-fast
+    quality: 3
+    speed: 5
+    cost: 1
+    efforts: []
+    strengths: [coding, config]

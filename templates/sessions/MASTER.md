@@ -27,6 +27,7 @@
 | 마스터 → 매니저 (지시·답) | `orca orchestration send --to run:<매니저 Run> --type status --subject "<요지>" --body "<지시>"` |
 | 놓친 메일 확인 | `orca orchestration inbox --terminal run:<마스터 Run> --limit 50` |
 | 현황·정지 점검 | `python3 orchestration/tools/status.py` (`--stall`), 대시보드(`http://127.0.0.1:<dashboard.port>/`) |
+| 모델 배분·구독 사용량 | `python3 orchestration/tools/models.py stats` (모델별 실적, 구독별 오늘·7일 사용량) · `plan` (다음 투입 배분). 구독·목표(quality/balanced/economy/speed)는 `orchestration/models.yaml` — 바꾸는 것은 사용자 결정 |
 | 질문에 답 | `orca orchestration reply --id <메시지 ID> --body '<답>'` (status.py가 미처리 메시지 ID를 보여 준다) |
 | 새 마스터 세션으로 이어받기 | `orca orchestration run-use --id <마스터 Run>` → 위 '놓친 메일 확인' → status.py. 이전 세션이 살아 있으면 먼저 닫는다(메일을 둘이 나눠 받지 않게) |
 
