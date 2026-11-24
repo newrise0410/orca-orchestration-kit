@@ -8,7 +8,7 @@ AI 에이전트 다중 세션으로 소프트웨어를 개발하는 워크플로
 - 브랜치·머지 규약, 쓰기 범위 소유권, 번호 문서 체계, 요구사항 추적(RTM)·TBD·증적, 과정 기록 3종
 - 단일 HTML 대시보드(오프라인), 실행 격리 모듈(선택), 검토 단계 모듈(선택)
 
-버전: **v0.4.0** (2026-11-16)
+버전: **v0.4.1** (2026-11-16)
 
 ---
 
@@ -198,6 +198,7 @@ docs/                            VERIFY.md  DESIGN-NOTES.md  LESSONS.md
 
 | 버전 | 일자 | 내용 |
 |---|---|---|
+| v0.4.1 | 2026-11-16 | Orca 실기동 반영(`docs/VERIFY.md` 10장): Orca에서 꺼진 에이전트(`agent_unconfigured`)는 쿨다운 후 다시 라우팅, snap 격리 설치본(워커가 orca CLI를 못 부름)은 라우팅에서 뺀다 |
 | v0.4.0 | 2026-11-16 | **모델 자동 라우팅**(`docs/DESIGN-NOTES.md` 6장). `launch.sh`가 agent/model 없는 작업을 분류(난이도 1~5·태그·임계 경로)해 구독 CLI(claude·codex·antigravity·grok)·모델·effort를 점수로 고른다. 카탈로그 `tools/model_catalog.yaml`(키트 소유) + 정책 `orchestration/models.yaml`(seed: 쓸 구독·목표·동시 상한·교차 검토·고정·덮어쓰기). 가용성은 각 CLI의 모델 목록으로 확인(`models.py discover`), 실적은 dispatch.tsv × tasks.yaml 결과 × 검토 판정(`models.py feedback`)으로 학습, 한도는 `models.py cooldown`, 사용량은 Orca 집계(`models.py stats`). tasks.yaml `difficulty`·`tags`·`objective`·`route` 추가, dispatch.tsv 칸 추가(에이전트·모델·effort·키·난이도), status.py에 구독별 진행 수·쿨다운. **기존 설치본:** upgrade하면 models.yaml이 새로 생기고 라우팅이 켜진다(끄려면 `routing.enabled: false`). 검증: `docs/VERIFY.md` 9장 |
 | v0.3.0 | 2026-11-12 | 효율 검토 반영(`docs/DESIGN-NOTES.md` 4장, 교훈 L-14 ~ L-19). **결함:** upgrade가 키트 밖 파일을 덮어쓰던 것(→ `.kit-new`), status·cleanup의 진행 워커 오판·100개 잘림, launch가 선행·status를 안 보던 것, bootstrap `all`이 기동 보고 전에 abandon하던 것, 매니저 기동에 기존 워크트리 생성 플래그(`--display-name`), sync_main의 체크아웃 전환·자동 push. **효율:** 워커 고정 읽기 축소(AGENTS '읽을 것'), merged 보관(`archive_tasks.py`), MANAGER 분할(`procedures/`), SKILL 분할(`references/`), 정지 점검 도구(`status.py`, `hold`), 작업별 `agent/model/effort`, `launch.sh --review/--retry`, `slot.sh`, `evidence_lint.py`, pre-push 훅, 로컬 전용 운영(`project.git_remote`), 덧붙임 파일(`*.local.md`), upgrade 3방향 자동 병합·새 버전 알림, 회귀 시험 `tests/smoke.sh`. **기존 설치본:** `upgrade` 미리보기 → 로컬 전용이었으면 kit.yaml에 `git_remote: ""`부터 넣는다(`references/upgrade.md`). 검증: `docs/VERIFY.md` 8장 |
 | v0.2.0 | 2026-11-09 | 실전 프로젝트 후반 교훈 13건 반영(`docs/LESSONS.md` L-01 ~ L-13, 근거 `docs/DESIGN-NOTES.md` 3장). MANAGER.md에 main 머지 관문(범위 확인·체크아웃 분리·유효 회차·미추적 증적)·검토 작업·대기와 정지 점검 장 추가, 후속 작업·실행 중 send·수정/기능 분리·작업 크기 규칙. 검토 명세 `review-spec.md` 신설(기준 브랜치·읽기 전용 대상·실행 재현 H), `render_spec.py`가 작업별 `spec_template`·`{target}`을 읽음. worker-spec에 범위·부분 완료, AGENTS에 '셸 명령'(pid 대기, `${VAR:?}`), integration-spec·sim 블록에 관문 유효성, MASTER에 정지 점검·범위 축소 선택지, 구조 문서 완료 기준·소통 표 갱신, 스킬에 '운영 점검'. **기존 설치본:** `upgrade`로 managed 파일 갱신, AGENTS.md(seed)는 `--include-seed` diff를 보고 '셸 명령' 절을 손으로 옮긴다. 검증: `docs/VERIFY.md` 7장 |

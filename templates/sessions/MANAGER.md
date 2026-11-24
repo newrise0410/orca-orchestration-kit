@@ -66,6 +66,8 @@
 - **모델은 라우팅에 맡긴다.** `launch.sh`가 작업마다 난이도·태그를 분류해 구독·모델·effort를 고른다(`orchestration/models.yaml`). 투입 출력의 `라우팅:` 줄을 본다.
   - 분류가 틀린 작업만 tasks.yaml에 `difficulty: easy|normal|hard|critical`(또는 `tags`)을 적는다. 모델을 손으로 고정(`route:`·`agent/model`)하는 것은 이유가 있을 때만(예: 특정 모델만 아는 도구).
   - 워커가 사용량 한도(usage limit, rate limit, quota)로 멈추거나 실패하면 그 구독을 `models.py cooldown`으로 빼고 다시 낸다. 실패한 작업은 다음 투입 때 난이도를 올리고 실패한 모델을 피한다.
+  - Orca에서 꺼진 에이전트로 라우팅되면 `launch.sh`가 그 구독을 24시간 쿨다운하고 다른 구독으로 다시 고른다. 켠 뒤에는 `models.py cooldown --clear <에이전트>`.
+  - Antigravity(`agy`)는 작업 폴더를 신뢰해야 시작한다(새 워크트리마다 확인 창). 확인 창에서 멈춘 워커는 마스터에 올린다.
   - 검토 판정은 실적에 반영한다: `models.py feedback <ID> pass|minor|major|fail`(`procedures/review.md` 2). 웨이브가 끝나면 `models.py stats`를 보고 맞지 않는 점수는 `models.yaml models:`에서 고친다.
 - **결함 수정과 새 기능을 한 작업에 섞지 않는다(L-10).** 수정 → 머지 → 검토를 먼저 끝내고 새 기능은 별도 작업으로 낸다.
 - **대형 구현은 미리 쪼갠다(L-13).** 한 세션이 소화하는 양은 경험상 4묶음 안팎이다. 크면 차수(`<ID>a`, `<ID>b`)로 낸다. '부분 완료' 보고가 오면 남은 목록으로 다음 차수를 낸다.

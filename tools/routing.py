@@ -130,14 +130,17 @@ def discover(repo, catalog, refresh=False, timeout=30):
     if not refresh and cp.is_file():
         try:
             c = json.loads(cp.read_text(encoding="utf-8"))
-            if time.time() - c.get("ts", 0) < CACHE_TTL and set(c.get("agents", {})) >= set(catalog["agents"]):
+            if c.get("v") == 2 and time.time() - c.get("ts", 0) < CACHE_TTL and set(c.get("agents", {})) >= set(catalog["agents"]):
                 return c["agents"]
         except (json.JSONDecodeError, OSError):
             pass
     res = {}
     for ag, spec in catalog["agents"].items():
         binp = shutil.which(str(spec.get("bin") or ag))
-        info = {"bin": binp, "models": None, "error": None}
+        real = os.path.realpath(binp) if binp else ""
+        # snap 격리 설치본은 $HOME의 숨김 폴더(Orca CLI 심 ~/.config/orca/…)를 실행하지 못해 worker_done·ask를 보낼 수 없다
+        confined = bool(binp) and (binp.startswith("/snap/") or real.startswith("/snap/") or real.endswith("/usr/bin/snap"))
+        info = {"bin": binp, "models": None, "error": None, "confined": confined}
         if binp:
             ms, err = list_models(spec.get("list"), binp, timeout)
             info["models"] = sorted(ms) if ms is not None else None
@@ -145,7 +148,7 @@ def discover(repo, catalog, refresh=False, timeout=30):
         res[ag] = info
     try:
         cp.parent.mkdir(parents=True, exist_ok=True)
-        cp.write_text(json.dumps({"ts": time.time(), "agents": res}, ensure_ascii=False, indent=1), encoding="utf-8")
+        cp.write_text(json.dumps({"v": 2, "ts": time.time(), "agents": res}, ensure_ascii=False, indent=1), encoding="utf-8")
     except OSError:
         pass
     return res
@@ -166,6 +169,8 @@ def availability(key, m, pol, disc):
     info = disc.get(ag)
     if not info or not info.get("bin"):
         return False, f"{ag} CLI 없음"
+    if info.get("confined") and not (pol.get("agents") or {}).get(ag, {}).get("allow_confined"):
+        return False, f"{ag}가 snap 격리 설치본이라 워커가 orca CLI를 못 부른다(worker_done·ask 불가). snap이 아닌 설치본이 필요"
     known = info.get("models")
     if known is not None and not any(i in known for i in model_ids(m)):
         return False, f"{m.get('model')}가 {ag} 모델 목록에 없음"

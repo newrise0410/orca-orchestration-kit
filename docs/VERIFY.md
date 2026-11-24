@@ -119,3 +119,18 @@ kit.py bootstrap --target <tmp>/empty --dry-run
 | 반입 검사 | 추가·변경 파일 전체에서 실사용 프로젝트 이름·호스트·계정·이메일·Orca 계정 ID·홈 경로 | 0건 |
 
 **하지 않은 것:** 라우팅으로 Orca 워커를 실제로 띄우지 않았다(dry-run 명령까지만). 특히 Antigravity·Grok 워커를 Orca로 띄웠을 때 `--model` 값이 그대로 먹는지, Grok에 `--effort`가 먹는지는 실기동으로 확인해야 한다. 카탈로그 점수는 추정이고 실적이 쌓이기 전에는 보정되지 않는다.
+
+## 10. v0.4.1: Orca 실기동 (2026-11-16)
+시험 전용 Run(`run-create`)을 만들고, 키트 저장소의 현재 워크트리에서 읽기 전용 확인 작업("쓰는 모델을 한 줄로 보고")을 띄웠다. 끝난 뒤 워커를 멈추고 해제했으며 저장소 변경은 없었다.
+
+| 에이전트 | 명령 | 결과 |
+|---|---|---|
+| grok | `worker-start --agent grok --model grok-4.7 --effort low` | **거부:** `agent_unconfigured`(Orca 설정에서 Grok 에이전트가 꺼져 있음). 워커를 만들기 전에 거부되어 남는 자원 없음 |
+| antigravity | `worker-start --agent antigravity --model gemini-3.8-flash-low` | Orca가 모델 ID를 그대로 넘겼다(프로세스 `agy --dangerously-skip-permissions --model gemini-3.8-flash-low`, 화면 "Gemini 3.8 Flash · low"). 처음엔 **작업 폴더 신뢰 확인 창**에서 `agent_readiness` 실패. snap 설치본은 신뢰 목록을 `~/snap/antigravity-cli/common/.gemini/antigravity-cli/settings.json`에서 읽는다. 시험 동안만 그 목록에 키트 저장소를 넣자 시작했고, 모델을 "Gemini 3.8 Flash (Reasoning Effort: Low)"로 답했다. **그러나 snap 격리 때문에 Orca CLI 심(`~/.config/orca/…`)을 실행하지 못해 `worker_done`을 보내지 못했다**(워커 스스로 Permission denied를 보고). 시험 뒤 신뢰 목록은 원래대로 되돌렸다 |
+
+**키트 반영(v0.4.1):**
+- `launch.sh`: `agent_unconfigured`를 받으면 그 구독을 24시간 쿨다운하고, 자동 라우팅이었으면 한 번 다시 골라 같은 Orca 작업에 띄운다.
+- `models.py discover`/라우팅: snap 격리 설치본(`/snap/…`, `/usr/bin/snap` 링크)을 '워커로 못 씀'으로 표시하고 뺀다. 모델 목록 캐시 형식에 판(`v: 2`)을 넣어 옛 캐시를 버린다.
+- 회귀 시험 70/70(+ snap 격리 제외, 꺼진 에이전트 재라우팅).
+
+**사용자 할 일(구독을 라우팅에 넣으려면):** Grok은 Orca 설정에서 에이전트를 켠다. Antigravity는 snap이 아닌 설치본으로 바꾼다(그 전까지 라우팅이 자동으로 뺀다). Codex·Claude는 이번에 띄워 보지 않았다(기존 운영에서 쓰던 경로).

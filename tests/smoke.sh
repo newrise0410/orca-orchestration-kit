@@ -230,6 +230,27 @@ mkdir -p "$KIT_ORCA_HOME"; printf '{"dailyAggregates":[{"day":"%s","model":"clau
 o=$($M stats 2>&1)
 check "stats: Orca 사용량(오늘 출력 토큰)" has "$o" "claude: 오늘 3000k"
 o=$(python3 $T/status.py --no-orca 2>&1); check "status.py --no-orca (라우팅 포함 설치본)" test -n "$o"
+sed -i 's/^  agents: .*/  agents: [claude, codex, antigravity, grok]/' orchestration/models.yaml
+# snap 격리 설치본(/snap/bin/x → /usr/bin/snap)은 워커로 못 쓴다: worker_done·ask를 보낼 orca CLI를 실행하지 못한다
+mkdir -p "$W/fake/usr/bin" "$W/bin2"; cp "$W/bin/agy" "$W/fake/usr/bin/snap"; ln -sf "$W/fake/usr/bin/snap" "$W/bin2/agy"
+o=$(PATH="$W/bin2:$PATH" $M discover 2>&1)
+check "snap 격리 agy는 제외" bash -c 'grep -q "snap 격리" <<<"$0" && grep -q "✗ agy-gemini-flash" <<<"$0"' "$o"
+$M discover >/dev/null 2>&1
+# Orca에서 꺼진 에이전트(agent_unconfigured)는 쿨다운하고 다시 라우팅한다
+cat > "$W/fake-orca" <<'SH'
+#!/bin/sh
+case "$*" in
+  *task-create*) echo '{"ok":true,"result":{"id":"task_abc123"}}' ;;
+  *worker-list*) echo '{"ok":true,"result":{"workers":[]}}' ;;
+  *worker-start*"--agent $FAKE_DISABLED "*) echo '{"ok":false,"error":{"code":"agent_unconfigured","message":"Agent launcher is disabled"}}'; exit 1 ;;
+  *worker-start*) echo '{"ok":true,"result":{"dispatchId":"ctx_def456","state":"ready"}}' ;;
+  *) echo '{"ok":false}'; exit 1 ;;
+esac
+SH
+chmod +x "$W/fake-orca"
+first_ag=$($M route --json X-DOC | python3 -c 'import sys,json; print(json.load(sys.stdin)["agent"])')
+o=$(FAKE_DISABLED=$first_ag ORCA_CLI_COMMAND="$W/fake-orca" KIT_RUN=run_x $T/launch.sh X-DOC 2>&1)
+check "꺼진 에이전트 → 쿨다운 후 다른 구독으로 투입" bash -c 'grep -q "다시 라우팅" <<<"$0" && grep -q "ctx_def456" <<<"$0" && grep -q "\"$1\"" orchestration/state/cooldown.json && ! tail -1 orchestration/state/dispatch.tsv | grep -q "	$1	"' "$o" "$first_ag"
 
 echo
 echo "결과: 통과 $pass · 실패 $fail  (작업 폴더 $W)"
