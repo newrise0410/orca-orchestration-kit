@@ -10,7 +10,7 @@ AI 에이전트 다중 세션으로 소프트웨어를 개발하는 워크플로
 - 단일 HTML 대시보드(오프라인, 작업 보드), 실행 격리 모듈(선택), 검토 단계 모듈(선택)
 - 배포: Claude Code 플러그인 마켓플레이스(자동 업데이트) 또는 심볼릭 링크
 
-버전: **v0.5.1** (2026-11-24) · 라이선스: [Apache-2.0](LICENSE)
+버전: **v0.5.2** (2026-11-24) · 라이선스: [Apache-2.0](LICENSE)
 
 ---
 
@@ -221,6 +221,7 @@ docs/                            VERIFY.md  DESIGN-NOTES.md  LESSONS.md
 
 | 버전 | 일자 | 내용 |
 |---|---|---|
+| v0.5.2 | 2026-11-24 | **결함:** 키트가 `.gitignore`에 넣던 `dashboard/`가 저장소 루트의 대시보드 출력뿐 아니라 `orchestration/tools/dashboard/`(대시보드 도구)까지 무시해서, 도구가 프로젝트 git에 올라가지 않았다(새로 받은 클론에 도구가 없고 upgrade로 바뀐 도구가 이력에 남지 않는다) → `/dashboard/`로 고쳤다. `upgrade`가 `.gitignore`의 키트 블록을 매니페스트 목록과 맞춘다(블록 밖의 줄은 그대로, v0.5.0에서 늘어난 `jev_cache.json` 줄도 이때 들어간다). **기존 설치본:** `upgrade --apply` 뒤 `git add orchestration/tools/dashboard`로 도구를 올린다. 검증: `docs/VERIFY.md` 13장 |
 | v0.5.1 | 2026-11-24 | 공개 배포 준비: Apache-2.0 라이선스, 공개 전 보안 점검(`docs/VERIFY.md` 12장). 문서의 원 프로젝트 출처 표기를 일반 표현으로 바꾸고 git 이력도 같은 기준으로 다시 썼다(커밋 해시가 바뀌었다) |
 | v0.5.0 | 2026-11-24 | **플러그인 마켓플레이스 배포**(`.claude-plugin/`, 2.1절): `/plugin install`로 설치하고 auto-update를 켜면 push마다 자동 갱신(버전 미지정 = 커밋 추적). **대시보드 개요를 작업 보드로**(`docs/VERIFY.md` 11장): 현재 웨이브·머지 진행 막대, 구독 칩(동시 실행/상한·쿨다운·snap 제외·오늘 토큰), 접을 수 있는 웨이브 × 모듈 격자(노드를 누르면 보드 카드 표시, 접은 상태 기억), 모듈 거르기, 대기·착수 가능·진행·검토·머지 열 보드(카드에 배정 모델·경과 시간, 착수 가능 카드에 라우팅 예정 모델과 투입 명령 복사). 라우팅 정보는 models.yaml이 있을 때만, CLI를 새로 돌리지 않고 캐시만 읽는다. **JEV 난이도 판정(선택, 기본 꺼짐)**: `models.yaml jev.enabled`와 `TYPESAFE_API_KEY`가 있으면 작업 제목·완료 조건만 TypeSafe JEV에 보내 난이도를 한 번 더 본다. `mode: shadow`(기본)는 기록만 하고 `models.py stats`가 규칙 분류와 결과를 비교, `live`는 신뢰도 0.6 이상일 때 적용. 키·네트워크가 없거나 실패하면 규칙 분류만 쓴다 |
 | v0.4.1 | 2026-11-16 | Orca 실기동 반영(`docs/VERIFY.md` 10장): Orca에서 꺼진 에이전트(`agent_unconfigured`)는 쿨다운 후 다시 라우팅, snap 격리 설치본(워커가 orca CLI를 못 부름)은 라우팅에서 뺀다 |

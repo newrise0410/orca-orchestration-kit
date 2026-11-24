@@ -46,6 +46,7 @@ check "남은 {{자리표시자}} 없음(MANAGER 제외)" test -z "$left"
 check "kit.yaml git_remote 빈 값" grep -q 'git_remote: ""' "$R/orchestration/kit.yaml"
 check "AGENTS: 원격 push 금지 문구" grep -q '원격에 push하지 않는다' "$R/AGENTS.md"
 check "procedures 설치" test -f "$R/orchestration/sessions/procedures/merge-gate.md"
+check ".gitignore: 대시보드 도구는 추적, 루트 출력만 무시" bash -c "cd $R && ! git check-ignore -q orchestration/tools/dashboard/build.py && git check-ignore -q dashboard/index.html"
 cd "$R" && git add -A && git commit -qm "[L0] init"
 T=orchestration/tools
 
@@ -144,6 +145,15 @@ $KIT upgrade --target "$U" --apply --summary >/dev/null 2>&1
 check "병합 결과에 양쪽 변경" bash -c "head -1 $U/orchestration/templates/worker-spec.md | grep -q '키트 새 판' && grep -q '프로젝트 끝줄' $U/orchestration/templates/worker-spec.md"
 check "키트 밖 파일은 보존 + .kit-new" bash -c "grep -q '프로젝트 파일' $U/orchestration/templates/review-spec.md && test -f $U/orchestration/templates/review-spec.md.kit-new"
 check "다시 미리보기: 남은 건 키트 밖 파일뿐" bash -c "$KIT upgrade --target $U --summary | grep -c '^===' | grep -qx 1"
+# .gitignore 키트 블록: 옛 판(dashboard/)을 upgrade가 매니페스트와 맞추고, 블록 밖의 줄은 그대로 둔다
+sed -i 's#^/dashboard/$#dashboard/#' "$U/.gitignore"; echo "mine.log" >> "$U/.gitignore"
+check "옛 블록이면 대시보드 도구가 무시됨(재현)" bash -c "cd $U && git check-ignore -q orchestration/tools/dashboard/build.py"
+o=$($KIT upgrade --target "$U" --summary 2>&1)
+check "upgrade 미리보기: .gitignore 키트 블록 갱신" has "$o" ".gitignore: 키트 블록 갱신"
+check "미리보기는 .gitignore를 바꾸지 않음" grep -qx 'dashboard/' "$U/.gitignore"
+$KIT upgrade --target "$U" --apply --summary >/dev/null 2>&1
+check "upgrade 적용: 블록 갱신 + 블록 밖 줄 보존" bash -c "cd $U && grep -qx '/dashboard/' .gitignore && grep -qx 'mine.log' .gitignore && ! git check-ignore -q orchestration/tools/dashboard/build.py && git check-ignore -q dashboard/index.html"
+check "다시 적용해도 .gitignore는 그대로" bash -c "! $KIT upgrade --target $U --summary | grep -q '.gitignore'"
 
 echo "[10] 모델 자동 라우팅"
 cd "$R"
