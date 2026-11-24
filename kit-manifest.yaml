@@ -6,7 +6,7 @@
 #   module: core(항상) / run(실행 격리) / ros2(ROS 2 프로필) / review(검토 단계)
 #   render: true면 {{...}}를 채운다. keep: 설치 때 남겨 둘 자리표시자(부트스트랩에서 채움)
 #   mode:  실행 권한 등 (기본 644)
-version: 0.4.1
+version: 0.5.0
 
 files:
   # ── 공통 규칙
@@ -83,4 +83,4 @@ files:
 dirs: [orchestration/specs, docs/05_reports, docs/07_process/snapshots]
 
 # .gitignore에 넣을 줄 (표시 블록 안에서 관리)
-gitignore: [dashboard/, .runs/, "*.kit-new", __pycache__/, orchestration/state/models_cache.json, orchestration/state/cooldown.json]
+gitignore: [dashboard/, .runs/, "*.kit-new", __pycache__/, orchestration/state/models_cache.json, orchestration/state/cooldown.json, orchestration/state/jev_cache.json]

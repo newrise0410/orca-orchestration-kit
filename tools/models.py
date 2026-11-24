@@ -130,6 +130,26 @@ def cmd_stats(a):
             cells.append(f"{s / n:4.2f} ({n:2d})" if n else "    -     ")
         print(f"{k:20} {cnt.get(k, 0):4}  " + "   ".join(cells))
     print("(칸: 평균 결과 점수 1=한 번에 머지, 0.6=검토 지적 뒤 머지, 0=다시 띄움. 괄호는 건수)")
+    jcfg = routing.jev_cfg(pol)
+    jo = [o for o in outs if o.get("jev")]
+    if jcfg.get("enabled") or jo:
+        print(f"\n# JEV 난이도 비교 (jev.enabled={str(bool(jcfg.get('enabled'))).lower()}, mode={jcfg.get('mode')})")
+        if not jo:
+            print("- 결과가 정해진 투입 중 JEV 기록이 있는 것이 아직 없다")
+        else:
+            def f(x):
+                try:
+                    return float(x)
+                except (TypeError, ValueError):
+                    return None
+            pairs = [(f(o["difficulty"]), f(o["jev"]), o["score"]) for o in jo if f(o["difficulty"]) is not None and f(o["jev"]) is not None]
+            gap = sum(abs(a - b) for a, b, _ in pairs) / max(len(pairs), 1)
+            print(f"- 비교 {len(pairs)}건 · 라우팅에 쓴 난이도와 JEV의 평균 차이 {gap:.2f}")
+            for label, sel in (("JEV가 1 이상 더 어렵게 봄", lambda a, b: b - a >= 1), ("JEV가 1 이상 더 쉽게 봄", lambda a, b: a - b >= 1),
+                               ("거의 같음(차이 1 미만)", lambda a, b: abs(a - b) < 1)):
+                g = [sc for a, b, sc in pairs if sel(a, b)]
+                print(f"  {label}: {len(g)}건" + (f" · 평균 결과 {sum(g) / len(g):.2f}" if g else ""))
+            print("  (JEV가 더 어렵게 본 작업의 결과가 낮으면 JEV가 규칙이 놓친 난이도를 잡는다는 뜻이다 → mode: live 검토)")
     cools = routing.read_cooldowns(repo)
     if cools:
         print("\n# 쿨다운")

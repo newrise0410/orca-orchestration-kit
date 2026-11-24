@@ -185,7 +185,7 @@ def main(argv=None):
             agent = a.agent or os.environ.get("KIT_AGENT") or t.get("agent")
             model = a.model or t.get("model")
             effort = a.effort or t.get("effort")
-        rkey, rdiff = "", ""
+        rkey, rdiff, rjev = "", "", ""
         catalog, pol = routing.load(repo)
         pinned = t.get("route") if mode != "review" else None
         if pinned and not (agent or model):
@@ -206,6 +206,7 @@ def main(argv=None):
             if dec.get("key"):
                 agent, model, effort = dec["agent"], dec["model"], effort or dec["effort"]
                 rkey, rdiff = dec["key"], f"{dec['difficulty']:.1f}"
+                rjev = f"{dec['jev']['difficulty']:.1f}" if (dec.get("jev") or {}).get("difficulty") is not None else ""
                 print(f"  라우팅: {routing.describe(dec)}")
                 if a.explain:
                     print("    난이도 근거: " + (" · ".join(dec["reasons"]) or "기본"))
@@ -247,6 +248,7 @@ def main(argv=None):
                     if dec.get("key"):
                         agent, model, effort = dec["agent"], dec["model"], dec["effort"]
                         rkey, rdiff = dec["key"], f"{dec['difficulty']:.1f}"
+                        rjev = f"{dec['jev']['difficulty']:.1f}" if (dec.get("jev") or {}).get("difficulty") is not None else ""
                         print(f"  다시 라우팅: {routing.describe(dec)}")
                         continue
             break
@@ -259,7 +261,7 @@ def main(argv=None):
             continue
         with open(repo / "orchestration/state/dispatch.tsv", "a", encoding="utf-8") as f:
             f.write("\t".join([title, otid, did, name, dt.datetime.now().strftime("%F %T"),
-                               agent, str(model or ""), str(effort or ""), rkey, rdiff]) + "\n")
+                               agent, str(model or ""), str(effort or ""), rkey, rdiff, rjev]) + "\n")
         launched[agent] = launched.get(agent, 0) + 1
         if mode == "new" and tid in active:
             tpath.write_text(task_status.set_status(tpath.read_text(encoding="utf-8"), tid, "running"), encoding="utf-8")

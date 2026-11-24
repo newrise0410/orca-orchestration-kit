@@ -7,14 +7,19 @@
   학습      state/dispatch.tsv(누가 어떤 작업을 맡았나) × tasks.yaml 결과 × state/route_feedback.tsv(검토 판정)
   부하      진행 중 워커 수(에이전트별), 쿨다운(state/cooldown.json: 사용량 한도에 걸린 구독)
 결정은 LLM 없이 점수로 한다(빠르고 재현된다). 점수가 왜 그렇게 나왔는지 reasons로 남긴다.
+선택: models.yaml jev.enabled이면 TypeSafe JEV(판정 전용 모델)에 작업 제목·완료 조건을 보내 난이도를 한 번 더 본다.
+      기본은 꺼져 있고, 켜도 mode: shadow면 기록만 한다(models.py stats가 규칙 분류와 비교). 키·네트워크가 없으면 조용히 건너뛴다.
 """
 import datetime as dt
+import hashlib
 import json
 import os
 import re
 import shutil
 import subprocess
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import kitlib
@@ -207,7 +212,7 @@ def read_dispatch(repo, ids):
         r = {"title": c[0], "kit_id": kid, "mode": mode, "did": c[2], "ts": c[4],
              "agent": c[5] if len(c) > 5 else "", "model": c[6] if len(c) > 6 else "",
              "effort": c[7] if len(c) > 7 else "", "key": c[8] if len(c) > 8 else "",
-             "difficulty": c[9] if len(c) > 9 else ""}
+             "difficulty": c[9] if len(c) > 9 else "", "jev": c[10] if len(c) > 10 else ""}
         rows.append(r)
     return rows
 
@@ -286,7 +291,7 @@ def outcomes(rows, tasks, feedback, models):
                 k = key_of_row(r, models)
                 if k:
                     res.append({"key": k, "band": band(r["difficulty"]), "score": scores[id(r)], "kit_id": tid,
-                                "agent": r["agent"], "did": r["did"]})
+                                "agent": r["agent"], "did": r["did"], "difficulty": r["difficulty"], "jev": r.get("jev", "")})
     return res
 
 
@@ -522,6 +527,93 @@ def classify(t, tasks, pol, mode="new", prior_fails=0):
     return {"difficulty": max(1.0, min(5.0, d)), "tags": sorted(tags), "critical": critical, "reasons": reasons}
 
 
+# ───────────────────────── JEV (선택, 기본 꺼짐)
+
+JEV_DEFAULT = {"enabled": False, "mode": "shadow", "min_confidence": 0.6, "timeout": 8, "model": "jev-latest",
+               "url": "https://api.typesafe.ai/v1/systemone", "key_env": "TYPESAFE_API_KEY"}
+JEV_LEVELS = [
+    "Trivial: a mechanical edit such as a typo, rename, version bump or small config change",
+    "Easy: a small, well-specified change in one place with obvious tests",
+    "Moderate: a typical feature or fix touching a few files; needs some design and tests",
+    "Hard: cross-module work, concurrency, protocols, security or unclear requirements; easy to get subtly wrong",
+    "Very hard: foundational design or contracts many other tasks depend on; mistakes are costly and hard to undo",
+]
+
+
+def jev_cfg(pol):
+    return {**JEV_DEFAULT, **(pol.get("jev") or {})}
+
+
+def jev_state(t):
+    """외부로 보내는 것은 제목과 완료 조건뿐이다(경로·메모·코드는 보내지 않는다)."""
+    acc = t.get("acceptance")
+    acc = "\n".join(f"- {x}" for x in acc) if isinstance(acc, list) else _text(acc)
+    return f"Software task for an AI coding agent working alone in a git worktree.\nTitle: {_text(t.get('title'))}\nAcceptance criteria:\n{acc}"
+
+
+def jev_judge(repo, t, pol, net=True):
+    """JEV 난이도 판정 → None(꺼짐) | {difficulty 1~5, confidence, model, cached} | {error}.
+    같은 내용은 state/jev_cache.json에서 다시 쓴다. net=False면 캐시만 본다(대시보드처럼 자주 도는 곳)."""
+    cfg = jev_cfg(pol)
+    if not cfg.get("enabled"):
+        return None
+    state = jev_state(t)
+    h = hashlib.sha256(json.dumps([cfg["model"], state, JEV_LEVELS], ensure_ascii=False).encode()).hexdigest()[:20]
+    cp = state_dir(repo) / "jev_cache.json"
+    try:
+        cache = json.loads(cp.read_text(encoding="utf-8")) if cp.is_file() else {}
+    except (OSError, json.JSONDecodeError):
+        cache = {}
+    if h in cache:
+        return dict(cache[h], cached=True)
+    if not net:
+        return {"error": "캐시에 없음"}
+    key = os.environ.get(str(cfg["key_env"]))
+    if not key:
+        return {"error": f"{cfg['key_env']} 없음"}
+    body = {"state": state, "model": cfg["model"],
+            "questions": {"difficulty": {"type": "score", "criteria": JEV_LEVELS,
+                                         "instructions": "How difficult is this task for an AI coding agent to complete correctly on the first attempt?"}}}
+    req = urllib.request.Request(str(cfg["url"]), data=json.dumps(body).encode(), method="POST",
+                                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=float(cfg["timeout"])) as r:
+            resp = json.loads(r.read().decode("utf-8"))
+        ans = resp["answers"]["difficulty"]
+        res = {"difficulty": round(1.0 + float(ans["score"]), 2), "confidence": round(float(ans.get("confidence", 0)), 3),
+               "model": str(resp.get("model", cfg["model"]))}
+    except (urllib.error.URLError, OSError, ValueError, KeyError, TypeError) as e:
+        return {"error": f"JEV 호출 실패: {str(e)[:120]}"}
+    cache[h] = dict(res, ts=time.time())
+    try:
+        cp.parent.mkdir(parents=True, exist_ok=True)
+        cp.write_text(json.dumps(cache, ensure_ascii=False, indent=1), encoding="utf-8")
+    except OSError:
+        pass
+    return dict(res, cached=False)
+
+
+def apply_jev(c, t, repo, pol, mode, net=True):
+    """classify 결과에 JEV 판정을 붙인다. live이고 신뢰도가 기준 이상이면 난이도를 바꾼다. 작업에 difficulty를 직접 줬으면 묻지 않는다."""
+    if mode != "new" or t.get("difficulty") is not None:
+        return None
+    j = jev_judge(repo, t, pol, net=net)
+    if not j:
+        return None
+    if "difficulty" not in j:
+        if net:
+            c["reasons"].append(f"JEV 건너뜀({j['error']})")
+        return j
+    cfg = jev_cfg(pol)
+    live = cfg.get("mode") == "live" and j["confidence"] >= float(cfg.get("min_confidence", 0.6))
+    j["applied"] = live
+    c["reasons"].append(f"JEV {j['difficulty']:.1f}(신뢰 {j['confidence']:.2f}, {'적용' if live else '기록만'})")
+    if live:
+        c["rule_difficulty"] = c["difficulty"]
+        c["difficulty"] = max(1.0, min(5.0, j["difficulty"]))
+    return j
+
+
 # ───────────────────────── 점수와 결정
 
 def pick_effort(m, d, objective, q):
@@ -588,7 +680,7 @@ def score(key, m, c, pol, ctx):
 
 
 def route(repo, cfg, tid, tasks, mode="new", live_dids=None, refresh=False, catalog=None, pol=None, disc=None,
-          extra_running=None):
+          extra_running=None, jev_net=True):
     """작업 하나의 결정. 반환: {key, agent, model, effort, difficulty, tags, reasons, why, alts, excluded}.
     후보가 없으면 key가 None. extra_running: 이번 호출에서 방금 띄운(아직 집계에 없는) 에이전트별 수."""
     if catalog is None or pol is None:
@@ -600,6 +692,7 @@ def route(repo, cfg, tid, tasks, mode="new", live_dids=None, refresh=False, cata
     fails = failed_keys(outs, tid)
     prior = len([o for o in outs if o["kit_id"] == tid and o["score"] < 0.5])
     c = classify(t, tasks, pol, mode, prior_fails=prior if mode == "new" else 0)
+    jv = apply_jev(c, t, repo, pol, mode, net=jev_net)
     impl = [r for r in rows if r["kit_id"] == tid and r["mode"] in ("new", "retry") and r["agent"]]
     ctx = {"objective": str(t.get("objective") or rcfg(pol, "objective", "balanced")),
            "learned": learned(outs), "running": running_by_agent(rows, tasks, live_dids),
@@ -633,7 +726,8 @@ def route(repo, cfg, tid, tasks, mode="new", live_dids=None, refresh=False, cata
             why.append(f"pin.{mode if (rcfg(pol, 'pin') or {}).get(mode) else t.get('layer')}")
         cands.append((s, key, why, full))
     if not cands:
-        return {"key": None, "difficulty": c["difficulty"], "tags": c["tags"], "reasons": c["reasons"], "excluded": excluded, "alts": []}
+        return {"key": None, "difficulty": c["difficulty"], "tags": c["tags"], "reasons": c["reasons"], "excluded": excluded, "alts": [],
+                "jev": jv}
     open_c = [x for x in cands if not x[3]] or cands      # 모두 상한이면 상한 무시(가장 덜 붐비는 쪽이 점수로 이긴다)
     for x in cands:
         if x[3] and x not in open_c:
@@ -646,7 +740,7 @@ def route(repo, cfg, tid, tasks, mode="new", live_dids=None, refresh=False, cata
     return {"key": key, "agent": m.get("agent"), "model": model, "effort": effort, "score": round(s, 2),
             "difficulty": c["difficulty"], "tags": c["tags"], "critical": c["critical"], "reasons": c["reasons"],
             "why": why, "alts": [(k, round(sc, 2)) for sc, k, _, _ in open_c[1:5]], "excluded": excluded,
-            "objective": ctx["objective"]}
+            "objective": ctx["objective"], "jev": jv, "rule_difficulty": c.get("rule_difficulty")}
 
 
 def describe(dec):
@@ -654,4 +748,6 @@ def describe(dec):
         return "후보 없음 (" + "; ".join(f"{k}: {v}" for k, v in list(dec.get("excluded", {}).items())[:6]) + ")"
     eff = f" · {dec['effort']}" if dec.get("effort") else ""
     return (f"{dec['key']} → {dec['agent']} {dec['model']}{eff} · 난이도 {dec['difficulty']:.1f}"
-            + (f" · 태그 {','.join(dec['tags'])}" if dec["tags"] else "") + (" · 임계 경로" if dec.get("critical") else ""))
+            + (f" · 태그 {','.join(dec['tags'])}" if dec["tags"] else "") + (" · 임계 경로" if dec.get("critical") else "")
+            + (f" · JEV {dec['jev']['difficulty']:.1f}{'(적용)' if dec['jev'].get('applied') else '(기록)'}"
+               if (dec.get("jev") or {}).get("difficulty") is not None else ""))

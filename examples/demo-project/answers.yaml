@@ -6,6 +6,7 @@ modules:
   - {key: api, name: API 서버, short: API}
   - {key: web, name: 웹 UI, short: WEB}
 review_preset: none
+agents: claude,codex,antigravity,grok   # 예제를 머신과 무관하게 만든다(기본은 설치된 CLI 자동 감지)
 run: false
 remote: ""
 build_cmd: npm run build

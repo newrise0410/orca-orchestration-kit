@@ -252,6 +252,53 @@ first_ag=$($M route --json X-DOC | python3 -c 'import sys,json; print(json.load(
 o=$(FAKE_DISABLED=$first_ag ORCA_CLI_COMMAND="$W/fake-orca" KIT_RUN=run_x $T/launch.sh X-DOC 2>&1)
 check "꺼진 에이전트 → 쿨다운 후 다른 구독으로 투입" bash -c 'grep -q "다시 라우팅" <<<"$0" && grep -q "ctx_def456" <<<"$0" && grep -q "\"$1\"" orchestration/state/cooldown.json && ! tail -1 orchestration/state/dispatch.tsv | grep -q "	$1	"' "$o" "$first_ag"
 
+# JEV(선택, 기본 꺼짐): 꺼져 있으면 부르지 않는다. 켜면 shadow는 기록만, live는 신뢰도 기준 이상일 때 난이도를 바꾼다.
+cat > "$W/fake-jev.py" <<'PY'
+import http.server, json, sys
+class H(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length", 0)); body = json.loads(self.rfile.read(n))
+        ok = self.headers.get("Authorization") == "Bearer test-key" and body["questions"]["difficulty"]["type"] == "score"
+        out = {"model": "jev-test", "answers": {"difficulty": {"type": "score", "score": 3.6, "confidence": 0.9}}} if ok else {"error": "auth"}
+        self.send_response(200 if ok else 401); self.send_header("Content-Type", "application/json"); self.end_headers()
+        self.wfile.write(json.dumps(out).encode()); open(sys.argv[2], "a").write("call\n")
+    def log_message(self, *a): pass
+http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
+PY
+JP=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1])')
+python3 "$W/fake-jev.py" "$JP" "$W/jev-calls.log" & jpid=$!
+sleep 0.5
+o=$(TYPESAFE_API_KEY=test-key $M route --json X-DOC 2>/dev/null)
+check "JEV 기본 꺼짐: 부르지 않음" bash -c '! test -s "$1" && python3 -c "import json,sys;d=json.loads(sys.argv[1]);sys.exit(0 if d.get(\"jev\") is None else 1)" "$0"' "$o" "$W/jev-calls.log"
+cp orchestration/models.yaml "$W/models.yaml.pre-jev"
+printf 'jev:\n  enabled: true\n  mode: shadow\n  url: http://127.0.0.1:%s/v1/systemone\n' "$JP" > "$W/jev.yaml"
+python3 - "$W/jev.yaml" <<'PY'
+import sys, yaml
+p = "orchestration/models.yaml"; d = yaml.safe_load(open(p)); d["jev"] = yaml.safe_load(open(sys.argv[1]))["jev"]
+yaml.safe_dump(d, open(p, "w"), allow_unicode=True, sort_keys=False)
+PY
+base=$(python3 -c "import json,sys;print(json.loads(sys.argv[1])['difficulty'])" "$o")
+o=$(TYPESAFE_API_KEY=test-key $M route --json X-DOC 2>/dev/null)
+check "JEV shadow: 기록만(난이도 그대로)" python3 -c "import json,sys;d=json.loads(sys.argv[1]);j=d['jev'];sys.exit(0 if j['difficulty']==4.6 and not j['applied'] and d['difficulty']==float(sys.argv[2]) else 1)" "$o" "$base"
+o=$($M route --json X-DOC 2>/dev/null)
+check "JEV 캐시: 키 없이도 같은 판정, 다시 부르지 않음" bash -c 'python3 -c "import json,sys;sys.exit(0 if json.loads(sys.argv[1])[\"jev\"][\"cached\"] else 1)" "$0" && test "$(wc -l < "$1")" -eq 1' "$o" "$W/jev-calls.log"
+sed -i 's/^  mode: shadow$/  mode: live/' orchestration/models.yaml
+o=$($M route --json X-DOC 2>/dev/null)
+check "JEV live: 신뢰도 0.9 ≥ 0.6이면 난이도 적용" python3 -c "import json,sys;d=json.loads(sys.argv[1]);sys.exit(0 if d['jev']['applied'] and d['difficulty']==4.6 and d['rule_difficulty']==float(sys.argv[2]) else 1)" "$o" "$base"
+rm -f orchestration/state/jev_cache.json
+o=$(TYPESAFE_API_KEY=wrong $M route --json X-DOC 2>/dev/null)
+check "JEV 실패하면 규칙 분류로" python3 -c "import json,sys;d=json.loads(sys.argv[1]);sys.exit(0 if 'error' in d['jev'] and d['difficulty']==float(sys.argv[2]) else 1)" "$o" "$base"
+kill $jpid 2>/dev/null; wait $jpid 2>/dev/null
+cp "$W/models.yaml.pre-jev" orchestration/models.yaml
+
+# 대시보드 개요: 상태 열 보드 · 웨이브 × 모듈 격자 · 구독 칩(쿨다운) · 투입한 작업의 모델 칩
+python3 $T/dashboard/build.py --out $W/dash2.html >/dev/null 2>&1
+check "대시보드 개요: 보드·격자·구독 칩·모델 칩" bash -c 'f=$0; grep -q "id=\"ov-board\"" $f && grep -q "id=\"ov-dag\"" $f && grep -q "class=\"sub cool\"" $f && grep -q "class=\"kc\" data-id=\"X-DOC\"" $f && grep -q "class=\"km mono\"" $f' "$W/dash2.html"
+mv orchestration/models.yaml "$W/models.yaml.bak"
+python3 $T/dashboard/build.py --out $W/dash3.html >/dev/null 2>&1
+check "대시보드: models.yaml 없어도 보드는 나오고 구독 칩은 없음" bash -c 'grep -q "id=\"ov-board\"" $0 && ! grep -q "class=\"subs\"" $0' "$W/dash3.html"
+mv "$W/models.yaml.bak" orchestration/models.yaml
+
 echo
 echo "결과: 통과 $pass · 실패 $fail  (작업 폴더 $W)"
 [ $fail -eq 0 ]

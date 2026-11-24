@@ -40,3 +40,15 @@ classifier:
   hard_words: []
   easy_words: []
   tag_words: {}                # 예: {frontend: [admin/, 화면설계]}
+
+# JEV 난이도 판정 (선택, 기본 꺼짐). TypeSafe의 판정 전용 모델에 작업 제목·완료 조건만 보내 난이도(1~5)를 받는다.
+#   켜려면 enabled: true와 환경 변수 TYPESAFE_API_KEY가 필요하다. 키·네트워크가 없거나 실패하면 규칙 분류만 쓴다.
+#   작업 내용이 외부(api.typesafe.ai)로 나간다. 배포 제한 프로젝트에서는 켜지 않는다.
+#   shadow: 기록만 한다(dispatch.tsv 11번째 칸). models.py stats가 규칙 분류와 결과를 비교해 보여 준다.
+#   live: 신뢰도가 min_confidence 이상이면 JEV 난이도로 라우팅한다. 작업에 difficulty를 직접 줬으면 묻지 않는다.
+#   같은 내용은 state/jev_cache.json에서 다시 쓰고, 대시보드는 캐시만 읽는다.
+jev:
+  enabled: false
+  mode: shadow                 # shadow | live
+  min_confidence: 0.6
+  timeout: 8
