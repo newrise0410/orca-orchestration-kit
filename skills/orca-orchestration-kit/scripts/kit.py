@@ -324,6 +324,24 @@ def load_answers(a):
     return ans
 
 
+def gitignore_plan(target, man):
+    """.gitignore의 키트 블록을 매니페스트 목록과 맞춘다. 반환: (현재 본문, 새 본문, 상태).
+    상태: None(같음) · "추가"(블록 없음) · "갱신"(블록 내용이 다름). 블록 밖의 줄은 건드리지 않는다."""
+    gi = target / ".gitignore"
+    block = "\n".join([GI_BEGIN, *man.get("gitignore", []), GI_END]) + "\n"
+    cur = gi.read_text(encoding="utf-8") if gi.exists() else ""
+    i = cur.find(GI_BEGIN)
+    if i < 0:
+        return cur, cur + ("\n" if cur and not cur.endswith("\n") else "") + block, "추가"
+    j = cur.find(GI_END, i)
+    if j < 0:
+        return cur, cur, None                          # 끝 표시가 없다: 사람이 고친 블록이라 손대지 않는다
+    k = j + len(GI_END)
+    k += 1 if cur[k:k + 1] == "\n" else 0
+    new = cur[:i] + block + cur[k:]
+    return cur, new, (None if new == cur else "갱신")
+
+
 def cmd_init(a):
     target = Path(a.target).resolve()
     if not (target / ".git").exists() and git(target, "rev-parse", "--git-dir") is None:
@@ -367,13 +385,11 @@ def cmd_init(a):
         if not a.dry_run:
             (target / d).mkdir(parents=True, exist_ok=True)
             (target / d / ".gitkeep").touch()
-    gi = target / ".gitignore"
-    block = "\n".join([GI_BEGIN, *man.get("gitignore", []), GI_END]) + "\n"
-    cur = gi.read_text(encoding="utf-8") if gi.exists() else ""
-    if GI_BEGIN not in cur:
-        print("  ~ .gitignore (키트 블록 추가)")
+    gi_cur, gi_new, gi_state = gitignore_plan(target, man)
+    if gi_state:
+        print(f"  ~ .gitignore (키트 블록 {gi_state})")
         if not a.dry_run:
-            gi.write_text(cur + ("\n" if cur and not cur.endswith("\n") else "") + block, encoding="utf-8")
+            (target / ".gitignore").write_text(gi_new, encoding="utf-8")
     inst = {"kit_version": v["KIT_VERSION"], "installed": today.isoformat(), "kit_root_hint": "skills/orca-orchestration-kit",
             "kit_commit": kit_commit(),
             "answers": {k: ans[k] for k in ans}, "files": record}
@@ -604,9 +620,15 @@ def cmd_upgrade(a):
                 continue
             state += " · seed(프로젝트 소유): 적용하면 .kit-new로만 쓴다"
         changes.append((dst, state, cur, new, merged, e))
-    if not changes:
+    gi_cur, gi_new, gi_state = gitignore_plan(target, man)
+    if not changes and not gi_state:
         print("변경 없음")
         return 0
+    if gi_state:
+        print(f"\n=== .gitignore: 키트 블록 {gi_state}")
+        if not a.summary:
+            sys.stdout.writelines(difflib.unified_diff(gi_cur.splitlines(True), gi_new.splitlines(True),
+                                                       fromfile="현재/.gitignore", tofile="적용 후/.gitignore"))
     for dst, state, cur, new, merged, e in changes:
         print(f"\n=== {dst}: {state}")
         if new is not None and not a.summary:
@@ -634,6 +656,9 @@ def cmd_upgrade(a):
             os.chmod(p, int(str(e["mode"]), 8))
         base[dst] = sha(new)
         print(f"  ~ {dst}" + ("  (자동 병합)" if state.startswith("자동 병합") else ""))
+    if gi_state:
+        (target / ".gitignore").write_text(gi_new, encoding="utf-8")
+        print(f"  ~ .gitignore  (키트 블록 {gi_state}. 이제 무시되지 않는 파일은 'git status'로 보고 git add 한다)")
     inst["files"], inst["kit_version"] = base, v["KIT_VERSION"]
     inst["kit_commit"] = kit_commit()
     ip.write_text(json.dumps(inst, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

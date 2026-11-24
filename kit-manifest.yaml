@@ -82,5 +82,6 @@ files:
 # 빈 폴더 (.gitkeep)
 dirs: [orchestration/specs, docs/05_reports, docs/07_process/snapshots]
 
-# .gitignore에 넣을 줄 (표시 블록 안에서 관리)
-gitignore: [dashboard/, .runs/, "*.kit-new", __pycache__/, orchestration/state/models_cache.json, orchestration/state/cooldown.json, orchestration/state/jev_cache.json]
+# .gitignore에 넣을 줄 (표시 블록 안에서 관리. init이 넣고 upgrade가 이 목록과 맞춘다)
+# /dashboard/는 저장소 루트의 대시보드 출력만 가리킨다. 앞의 /가 없으면 orchestration/tools/dashboard/(도구)까지 무시된다.
+gitignore: [/dashboard/, .runs/, "*.kit-new", __pycache__/, orchestration/state/models_cache.json, orchestration/state/cooldown.json, orchestration/state/jev_cache.json]
