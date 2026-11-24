@@ -1,0 +1,12 @@
+{
+  "name": "orca-kit",
+  "description": "orca-orchestration-kit 배포용 마켓플레이스",
+  "owner": {"name": "orchestration-kit"},
+  "plugins": [
+    {
+      "name": "orca-orchestration-kit",
+      "source": "./",
+      "description": "Orca 3계층 세션 개발 워크플로 키트 (스킬 + 템플릿 + 도구)"
+    }
+  ]
+}

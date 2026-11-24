@@ -34,6 +34,23 @@ g checkout -q -b req/R-API-001 int/api
 mkdir -p "$W/api/src/todos" && printf '// 할 일 CRUD 라우터 (초안)\n' > "$W/api/src/todos/router.js"
 g add -A && GIT_COMMITTER_DATE="2026-11-06T13:00:00+09:00" g commit -qm "[R-API-001] 할 일 생성·조회 라우터 초안"
 g checkout -q main
+# 모델 라우팅 상태(가상): 구독 4개 중 Antigravity는 snap 격리, Grok은 Orca에서 꺼져 쿨다운. R-API-001은 Codex가 맡았다.
+# 사용량은 이 머신의 Orca 기록 대신 빈 폴더를 읽게 한다(KIT_ORCA_HOME).
+mkdir -p "$W/orchestration/state" "$W/.orca-empty"
+export KIT_ORCA_HOME="$W/.orca-empty"
+python3 - "$W/orchestration/state" <<'PY'
+import json, sys, time, datetime as dt
+d = sys.argv[1]
+agents = {"claude": {"bin": "/usr/local/bin/claude", "models": None, "error": None, "confined": False},
+          "codex": {"bin": "/usr/local/bin/codex", "models": ["gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna"], "error": None, "confined": False},
+          "antigravity": {"bin": "/snap/bin/agy", "models": ["gemini-3.8-flash-low", "gemini-3.8-flash-medium", "gemini-3.8-flash-high"], "error": None, "confined": True},
+          "grok": {"bin": "/usr/local/bin/grok", "models": ["grok-4.7", "grok-4.7-build-fast"], "error": None, "confined": False}}
+json.dump({"v": 2, "ts": time.time(), "agents": agents}, open(f"{d}/models_cache.json", "w"), indent=1)
+json.dump({"grok": {"until": time.time() + 23 * 3600, "reason": "Orca에서 꺼진 에이전트"}}, open(f"{d}/cooldown.json", "w"), indent=1)
+ts = (dt.datetime.now() - dt.timedelta(minutes=42)).strftime("%F %T")
+open(f"{d}/dispatch.tsv", "w").write("\t".join(["R-API-001 할 일 CRUD API", "task_demo01", "ctx_demo01", "R-API-001", ts,
+                                               "codex", "gpt-6.1-sol", "medium", "codex-sol", "3.0"]) + "\n")
+PY
 cd "$W"
 python3 orchestration/tools/validate_dag.py | tee "$HERE/validate_dag.txt"
 mkdir -p "$HERE/orchestration/specs"

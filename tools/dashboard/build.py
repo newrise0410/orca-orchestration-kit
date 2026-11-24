@@ -27,6 +27,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unicodedata
 from pathlib import Path
 from urllib.parse import quote
@@ -495,6 +496,7 @@ def load_tasks(repo, git, ref):
             "stage": str(raw.get("stage", defaults.get("stage", VSTAGES[0] if VSTAGES else "①"))),
             "yaml_status": str(raw.get("status", "todo")).strip().lower(),
             "sub_letters": letters.get(str(raw.get("id")), []),
+            "raw": raw,
         }
         if t["yaml_status"] not in RANK:
             warnings.append(f"{t['id']}: 알 수 없는 status '{t['yaml_status']}' → todo로 취급")
@@ -1210,6 +1212,159 @@ def build_dag_svg(tasks):
     return "".join(s)
 
 
+AGENT_LABEL = {"claude": "Claude", "codex": "Codex", "antigravity": "Antigravity", "grok": "Grok"}
+
+
+def fmt_tokens(n):
+    if not n:
+        return ""
+    return f"{n / 1e6:.1f}M" if n >= 1e6 else (f"{n / 1e3:.0f}k" if n >= 1e3 else str(n))
+
+
+def fmt_mins(m):
+    if m is None:
+        return ""
+    return f"{m // 60}시간 {m % 60}분" if m >= 60 else f"{m}분"
+
+
+def collect_models(repo, tasks):
+    """모델 라우팅 정보(orchestration/models.yaml이 있을 때만): 작업별 배정 모델, 구독 상태, 착수 가능 작업의 라우팅 미리보기.
+    CLI를 새로 돌리지 않는다(30초마다 재빌드하므로). 모델 목록은 state/models_cache.json에 있는 것만 쓴다."""
+    res = {"ok": False, "msg": "", "agents": [], "by_task": {}, "preview": {}, "objective": ""}
+    tools = Path(__file__).resolve().parent.parent
+    if not (tools / "routing.py").is_file():
+        res["msg"] = "routing.py 없음"
+        return res
+    if str(tools) not in sys.path:
+        sys.path.insert(0, str(tools))
+    try:
+        import routing
+        catalog, pol = routing.load(repo)
+    except Exception as e:  # 라우팅이 깨져도 대시보드는 나와야 한다
+        res["msg"] = f"라우팅 정보를 읽지 못함: {e}"
+        return res
+    if not pol.get("_present"):
+        res["msg"] = "orchestration/models.yaml 없음"
+        return res
+    raw = {t["id"]: dict(t.get("raw") or {}, id=t["id"], status=t["status"]) for t in tasks}
+    rows = routing.read_dispatch(repo, set(raw))
+    last = {}
+    for r in rows:
+        if r["kit_id"] and r["mode"] in ("new", "retry"):
+            last[r["kit_id"]] = r
+    now = dt.datetime.now()
+    for tid, r in last.items():
+        try:
+            mins = int((now - dt.datetime.strptime(r["ts"], "%Y-%m-%d %H:%M:%S")).total_seconds() // 60)
+        except ValueError:
+            mins = None
+        res["by_task"][tid] = {"agent": r["agent"], "model": r["model"], "effort": r["effort"],
+                               "mode": r["mode"], "ts": r["ts"], "mins": mins}
+    disc = None
+    try:
+        c = json.loads((routing.state_dir(repo) / "models_cache.json").read_text(encoding="utf-8"))
+        if c.get("v") == 2:
+            disc = c.get("agents") or {}
+    except (OSError, json.JSONDecodeError):
+        pass
+    running = routing.running_by_agent(rows, raw)
+    cools = routing.read_cooldowns(repo)
+    caps = routing.rcfg(pol, "max_concurrent") or {}
+    allow = routing.rcfg(pol, "agents")
+    usage = routing.orca_usage(1)
+    for ag in (list(allow) if allow is not None else list(catalog["agents"])):
+        info = (disc or {}).get(ag) or {}
+        if disc is None:
+            state, note = "unknown", "모델 확인 전 (models.py discover)"
+        elif not info.get("bin"):
+            state, note = "off", "CLI 없음"
+        elif info.get("confined") and not (pol.get("agents") or {}).get(ag, {}).get("allow_confined"):
+            state, note = "off", "제외 · snap 격리"
+        elif ag in cools:
+            left = max(0, int(cools[ag]["until"] - time.time()))
+            state = "cool"
+            note = f"쿨다운 {left // 3600}h" if left >= 3600 else f"쿨다운 {left // 60}분"
+            if cools[ag].get("reason"):
+                note += f" · {cools[ag]['reason']}"
+        else:
+            state, note = "ok", ""
+        res["agents"].append({"id": ag, "label": AGENT_LABEL.get(ag, ag), "state": state, "note": note,
+                              "running": running.get(ag, 0), "cap": caps.get(ag),
+                              "tokens": routing.today_tokens(usage, ag)})
+    res["enabled"] = routing.enabled(pol)
+    res["objective"] = str(routing.rcfg(pol, "objective", "balanced"))
+    if res["enabled"] and disc is not None:
+        for t in tasks:
+            if t["status"] != "ready":
+                continue
+            try:
+                res["preview"][t["id"]] = routing.route(repo, None, t["id"], raw, catalog=catalog, pol=pol, disc=disc, jev_net=False)
+            except Exception:
+                continue
+    res["ok"] = True
+    return res
+
+
+def build_overview_dag(tasks):
+    """개요 탭의 웨이브 × 모듈 격자. 노드를 누르면 아래 보드에서 그 카드를 표시한다(선과 상세는 작업 DAG 탭)."""
+    waves = [w for w, _ in WAVES if any(t["wave"] == w for t in tasks)]
+    waves += sorted({t["wave"] for t in tasks} - set(waves))
+    lanes = [p for p, _, _ in PRODUCTS if any(t["product"] == p for t in tasks)]
+    lanes += sorted({t["product"] for t in tasks} - set(lanes))
+    wl = dict(WAVES)
+    cols = f"grid-template-columns:76px repeat({len(waves)},minmax(140px,1fr));min-width:{76 + 148 * len(waves)}px"
+    s = [f'<div class="mg" style="{cols}"><div class="mh"></div>']
+    s += [f'<div class="mh">{esc(wl.get(w, w))}</div>' for w in waves]
+    for i, p in enumerate(lanes):
+        alt = " alt" if i % 2 == 0 else ""
+        s.append(f'<div class="ml{alt}" data-product="{esc(p)}">{esc(PRODUCT_SHORT.get(p, p))}</div>')
+        for w in waves:
+            cell = sorted((t for t in tasks if t["product"] == p and t["wave"] == w), key=lambda t: (t["depth"], t["id"]))
+            nodes = "".join(
+                f'<button type="button" class="mn st-{t["status"]}" data-id="{esc(t["id"])}" aria-pressed="false" '
+                f'title="{esc(t["id"])} {esc(t["title"])} — {STATUS_KO[t["status"]]}"><b>{esc(t["id"])}</b>'
+                f'<span>{esc(trunc(t["title"], 18))}</span></button>' for t in cell)
+            s.append(f'<div class="mc{alt}" data-product="{esc(p)}">{nodes}</div>')
+    s.append("</div>")
+    return "".join(s)
+
+
+def board_card(t, models, by_id):
+    """개요 보드의 작업 카드 한 장."""
+    tid, st = t["id"], t["status"]
+    bt = (models.get("by_task") or {}).get(tid)
+    dec = (models.get("preview") or {}).get(tid)
+    chipm, meta, extra = "", "", ""
+    if st in ("running", "review", "merged") and bt and bt.get("agent"):
+        chipm = " · ".join(x for x in (bt["agent"], bt["model"], bt["effort"]) if x)
+    elif st == "ready" and dec:
+        chipm = ("예정 " + " · ".join(x for x in (dec["agent"], dec["model"], dec.get("effort")) if x)) if dec.get("key") else "라우팅 후보 없음"
+    if st == "running":
+        if bt and bt.get("mins") is not None:
+            meta = f'투입 {esc(bt["ts"][5:16])} · {fmt_mins(bt["mins"])} 경과' + (" · 재시도" if bt.get("mode") == "retry" else "")
+        else:
+            meta = "진행 중"
+    elif st == "ready":
+        meta = "선행 모두 머지"
+        if dec:
+            meta = f'난이도 {dec["difficulty"]:.1f}' + (f' · {esc(", ".join(dec["tags"]))}' if dec.get("tags") else "") \
+                + (" · 임계 경로" if dec.get("critical") else "")
+        extra = (f'<button type="button" class="kcopy" data-cmd="orchestration/tools/launch.sh {esc(tid)}">'
+                 f'투입 명령 복사</button>')
+    elif st == "todo":
+        od = t["open_deps"]
+        meta = ("선행 대기 " + ", ".join(od[:3]) + (f" 외 {len(od) - 3}" if len(od) > 3 else "")) if od else "대기"
+    elif st == "review":
+        meta = "증적 있음 · 검토 대기" if t["evidence"] else "검토 대기"
+    else:
+        meta = "머지됨" + (" · 증적 있음" if t["evidence"] else "")
+    return (f'<article class="kc" data-id="{esc(tid)}" data-product="{esc(t["product"])}">'
+            f'<div class="kh">{task_link(tid, by_id)}<span class="kt">{esc(PRODUCT_SHORT.get(t["product"], t["product"]))} · {esc(t["wave"])}</span></div>'
+            f'<div class="ktl">{esc(t["title"])}</div>'
+            + (f'<span class="km mono">{esc(chipm)}</span>' if chipm else "")
+            + f'<div class="muted small">{meta}</div>{extra}</article>')
+
+
 # ─────────────────────────── 페이지 조립 ───────────────────────────
 
 def build(args):
@@ -1354,8 +1509,69 @@ def build(args):
     head = ginfo["head"]
     build_id = now.strftime("%Y%m%d%H%M%S%f")
 
-    # 개요
+    # 개요: 현재 웨이브 → 구독 → 웨이브 × 모듈 격자(접기) → 상태 열 보드 → 주의 사항 → 집계
+    models = collect_models(repo, tasks)
     a('<section class="panel" id="p-overview">')
+    cur = next((w for w, _ in WAVES if any(t["wave"] == w and t["status"] != "merged" for t in tasks)), None)
+    cur_title = dict(WAVES).get(cur, cur) if cur else ("모든 작업 머지" if tasks else "작업 없음")
+    a(f'<div class="ovhead"><h2>{esc(cur_title)}</h2><span class="muted">머지 {all_counts["merged"]}/{total} · 진행 {all_counts["running"]}'
+      f' · 검토 {all_counts["review"]} · 착수 가능 {all_counts["ready"]}</span>{stacked_bar(all_counts, total)}</div>')
+    if models["ok"] and models["agents"]:
+        chips = []
+        for g in models["agents"]:
+            if g["state"] == "ok":
+                cap = g["cap"] if g["cap"] is not None else "∞"
+                tok = f' <span class="muted small">오늘 {fmt_tokens(g["tokens"])}</span>' if g["tokens"] else ""
+                body = f'{esc(g["label"])} <b>{g["running"]}/{cap}</b>{tok}'
+            else:
+                body = f'{esc(g["label"])} <span class="small">{esc(trunc(g["note"], 28))}</span>'
+            chips.append(f'<span class="sub {g["state"]}" title="{esc(g["label"] + (" · " + g["note"] if g["note"] else " · 진행 중/동시 상한"))}">'
+                         f'<i class="dot"></i>{body}</span>')
+        flag = "" if models.get("enabled") else " · 자동 라우팅 꺼짐"
+        a(f'<div class="subs" aria-label="구독 상태">{"".join(chips)}'
+          f'<span class="muted small">목표 {esc(models["objective"])}{flag} · 자세히: <code>models.py plan</code></span></div>')
+    a('<details class="card ovdag" id="ov-dag" open><summary><b>작업 DAG · 웨이브 × 모듈</b> '
+      '<span class="muted small">노드를 누르면 아래 보드에서 그 카드를 표시한다</span></summary>')
+    a(f'<div class="tw">{build_overview_dag(tasks)}</div><div class="ovdag-f"><div class="legend">'
+      + "".join(f'<span><i class="dot st-{s}"></i>{STATUS_KO[s]}</span>' for s in STATUSES)
+      + '</div><a href="#dag" class="small">의존선·상세는 작업 DAG 탭 →</a></div></details>')
+    lanes = [p for p, _, _ in PRODUCTS if any(t["product"] == p for t in tasks)]
+    lanes += sorted({t["product"] for t in tasks} - set(lanes))
+    a('<div class="filters" id="ov-filter" role="group" aria-label="모듈 거르기"><span class="fl">모듈</span>'
+      '<button type="button" data-mod="all" aria-pressed="true">전체</button>'
+      + "".join(f'<button type="button" data-mod="{esc(p)}" aria-pressed="false">{esc(PRODUCT_SHORT.get(p, p))}</button>' for p in lanes)
+      + '</div>')
+    empty_txt = {"todo": "대기 작업 없음", "ready": "띄울 작업 없음", "running": "진행 중인 워커 없음",
+                 "review": "검토할 작업 없음", "merged": "아직 없음"}
+    worder = {w: i for i, (w, _) in enumerate(WAVES)}
+    a('<div class="tw"><div class="kb" id="ov-board">')
+    for s in STATUSES:
+        cards = sorted((t for t in tasks if t["status"] == s), key=lambda t: (worder.get(t["wave"], 99), t["depth"], t["id"]))
+        a(f'<section class="kcol st-{s}" data-status="{s}" aria-label="{STATUS_KO[s]}"><header><i class="dot"></i>'
+          f'<h3>{STATUS_KO[s]}</h3><span class="kcnt">{len(cards)}</span></header><div class="kbody">'
+          + "".join(board_card(t, models, by_id) for t in cards)
+          + f'<p class="kempty muted"{" hidden" if cards else ""}>{empty_txt[s]}</p></div></section>')
+    a('</div></div>')
+
+    alerts = list(warnings_global)
+    if models.get("msg") and models["msg"] not in ("orchestration/models.yaml 없음", "routing.py 없음"):
+        alerts.append(models["msg"])
+    if no_task_rows:
+        alerts.append(f"작업에 연결되지 않은 RTM 행 {len(no_task_rows)}개: " + ", ".join(no_task_rows))
+    # L1은 점진 통합이 정상이고, 같은 통합 브랜치(예: int/common)에서 이어서 하는 선행은 제외한다
+    early = [t for t in tasks if t["status"] in ("running", "review", "merged") and t["layer"] != "L1"
+             and any(by_id[d]["branch"] != t["branch"] for d in t["open_deps"])]
+    if early:
+        alerts.append("선행작업이 끝나지 않았는데 진행·완료로 판정된 작업: " + ", ".join(
+            f'{t["id"]}({STATUS_KO[t["status"]]}, 열린 선행 {"·".join(t["open_deps"])})' for t in early))
+    if unknown_reqs:
+        alerts.append("tasks.yaml reqs 중 RTM에 없는 ID: " + ", ".join(unknown_reqs))
+    for w in doc_warnings:
+        alerts.append(f'{w["path"]}: {w["msg"]}')
+    a(f'<div class="card"><h3>주의 사항 <span class="muted">{len(alerts)}</span></h3>')
+    a('<ul class="alerts">' + "".join(f'<li>{esc(x)}</li>' for x in alerts) + '</ul>' if alerts else '<p class="muted">없음</p>')
+    a('</div>')
+
     a('<div class="kpis">')
     kp = [
         ("작업", f'{all_counts["merged"]}/{total}', f'머지됨 · 진행 {all_counts["running"]} · 검토 {all_counts["review"]}'),
@@ -1402,8 +1618,8 @@ def build(args):
     a('</tbody></table></div></div>')
     a('</div>')
 
-    a('<div class="grid2">')
     if stages:
+      a('<div class="grid2">')
       a('<div class="card"><h3>검토 단계별 산출물</h3><div class="tw"><table class="compact"><thead><tr>'
       '<th>단계</th><th>주요 산출물</th><th>문서</th></tr></thead><tbody>')
       for st in stages:
@@ -1420,34 +1636,8 @@ def build(args):
                 first = False
             a(f'<tr>{lead}<td>{mark} {esc(name)}</td><td>{cell}</td></tr>')
       a('</tbody></table></div><p class="muted small">산출물 목록은 설정 review_stages 기준. 파일명 키워드로 매칭한다.</p></div>')
-
-    ready = [t for t in tasks if t["status"] == "ready"]
-    active = [t for t in tasks if t["status"] in ("running", "review")]
-    a('<div class="card"><h3>지금 할 수 있는 작업</h3>')
-    a('<ul class="tlist">' + "".join(
-        f'<li>{task_link(t["id"], by_id)} <span>{esc(t["title"])}</span> <span class="muted small">{esc(PRODUCT_SHORT.get(t["product"], t["product"]))} · {t["wave"]}</span></li>'
-        for t in ready) + '</ul>' if ready else '<p class="muted">착수 가능한 작업이 없음</p>')
-    a('<h3>진행·검토 중</h3>')
-    a('<ul class="tlist">' + "".join(f'<li>{task_link(t["id"], by_id)} {chip(t["status"])} <span>{esc(t["title"])}</span></li>' for t in active)
-      + '</ul>' if active else '<p class="muted">진행 중인 작업이 없음</p>')
-    a('</div></div>')
-
-    alerts = list(warnings_global)
-    if no_task_rows:
-        alerts.append(f"작업에 연결되지 않은 RTM 행 {len(no_task_rows)}개: " + ", ".join(no_task_rows))
-    # L1은 점진 통합이 정상이고, 같은 통합 브랜치(예: int/common)에서 이어서 하는 선행은 제외한다
-    early = [t for t in tasks if t["status"] in ("running", "review", "merged") and t["layer"] != "L1"
-             and any(by_id[d]["branch"] != t["branch"] for d in t["open_deps"])]
-    if early:
-        alerts.append("선행작업이 끝나지 않았는데 진행·완료로 판정된 작업: " + ", ".join(
-            f'{t["id"]}({STATUS_KO[t["status"]]}, 열린 선행 {"·".join(t["open_deps"])})' for t in early))
-    if unknown_reqs:
-        alerts.append("tasks.yaml reqs 중 RTM에 없는 ID: " + ", ".join(unknown_reqs))
-    for w in doc_warnings:
-        alerts.append(f'{w["path"]}: {w["msg"]}')
-    a(f'<div class="card"><h3>주의 사항 <span class="muted">{len(alerts)}</span></h3>')
-    a('<ul class="alerts">' + "".join(f'<li>{esc(x)}</li>' for x in alerts) + '</ul>' if alerts else '<p class="muted">없음</p>')
-    a('</div></section>')
+      a('</div>')
+    a('</section>')
 
     # 작업 DAG
     a('<section class="panel" id="p-dag" hidden>')
@@ -1877,6 +2067,50 @@ svg.focus .edge.hl{opacity:1;stroke:var(--accent);stroke-width:1.6;marker-end:ur
 svg.focus .node{opacity:.35}
 svg.focus .node.nbh,svg.focus .node.sel{opacity:1}
 .node.sel .nb{stroke:var(--accent);stroke-width:2}
+.ovhead{display:flex;flex-wrap:wrap;al\69gn-items:center;gap:4px 16px;margin:2px 0 10px}
+.ovhead h2{font-size:17px;margin:0;font-weight:650}
+.ovhead .bar{flex:1 1 200px;max-width:520px;margin:0}
+.subs{display:flex;flex-wrap:wrap;gap:6px;al\69gn-items:center;margin-bottom:12px}
+.sub{display:inline-flex;al\69gn-items:center;gap:6px;padding:5px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel);font-size:12.5px;--c:var(--st-merged)}
+.sub b{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-weight:600}
+.sub .dot{margin:0}
+.sub.off,.sub.unknown{border-style:dashed;color:var(--muted);background:transparent;--c:var(--st-todo)}
+.sub.cool{border-color:var(--warn);color:var(--warn);--c:var(--warn)}
+details.ovdag{padding:0}
+details.ovdag>summary{cursor:pointer;padding:9px 12px;user-select:none}
+details.ovdag>summary b{font-size:13px;margin-right:6px}
+details.ovdag[open]>summary{border-bottom:1px solid var(--line2)}
+.ovdag-f{display:flex;flex-wrap:wrap;justify-content:space-between;al\69gn-items:center;gap:4px 12px;padding:6px 12px 8px}
+.ovdag-f .legend{margin:0}
+.mg{display:grid}
+.mg>div{padding:5px 6px;border-bottom:1px solid var(--line2);display:flex;flex-direction:column;gap:4px;min-width:0}
+.mg .mh{font-size:11.5px;color:var(--muted);font-family:ui-monospace,Menlo,Consolas,monospace;padding:6px}
+.mg .ml{font-size:12px;color:var(--muted);font-weight:600;padding:9px 8px}
+.mg .alt{background:var(--lane1)}
+.mg .dim{opacity:.35}
+.mg .mn{display:flex;flex-direction:column;al\69gn-items:flex-start;gap:0;width:100%;min-height:34px;text-al\69gn:left;padding:3px 8px;border:1px solid var(--line);border-left:3px solid var(--c);border-radius:4px;background:color-mix(in srgb,var(--c) 8%,var(--panel));color:var(--fg);font-size:11.5px;line-height:1.35}
+.mg .mn b{font-family:ui-monospace,Menlo,Consolas,monospace;font-weight:650;font-size:11px}
+.mg .mn span{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.mg .mn:hover{border-color:var(--accent);border-left-color:var(--c)}
+.mg .mn[aria-pressed=true]{background:color-mix(in srgb,var(--c) 8%,var(--panel));color:var(--fg);border-color:var(--accent);border-left-color:var(--c);outline:2px solid var(--accent);outline-offset:1px}
+#ov-filter{margin:4px 0 8px}
+.kb{display:grid;grid-template-columns:repeat(5,minmax(200px,1fr));gap:10px;min-width:1040px;al\69gn-items:start;margin-bottom:12px}
+.kcol{background:var(--lane1);border:1px solid var(--line2);border-radius:8px;padding:8px;min-width:0}
+.kcol>header{display:flex;al\69gn-items:center;gap:6px;padding:2px 4px 8px}
+.kcol>header .dot{margin:0;border-radius:3px}
+.kcol h3{font-size:12.5px;margin:0;font-weight:650}
+.kcnt{margin-left:auto;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;color:var(--muted)}
+.kbody{display:flex;flex-direction:column;gap:6px;max-height:min(70vh,680px);overflow-y:auto}
+.kc{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px 10px;display:flex;flex-direction:column;gap:5px;min-width:0}
+.kc[hidden]{display:none}
+.kc.hl{outline:2px solid var(--accent);outline-offset:1px}
+.kh{display:flex;al\69gn-items:center;gap:6px;min-width:0}
+.kt{margin-left:auto;font-size:11px;padding:0 6px;border-radius:3px;background:var(--code);color:var(--muted);white-space:nowrap}
+.ktl{font-weight:500;line-height:1.4}
+.km{al\69gn-self:flex-start;font-size:11px;padding:1px 6px;border-radius:3px;background:color-mix(in srgb,var(--accent) 12%,var(--panel));color:var(--accent);overflow-wrap:anywhere}
+.kcopy{min-height:32px;background:var(--accent);color:var(--panel);border-color:var(--accent);font-weight:600}
+@media(max-width:700px){.kb{grid-template-columns:minmax(0,1fr);min-width:0}.kbody{max-height:none}}
+.kempty{margin:8px 4px;text-al\69gn:center;font-size:12px}
 #drawer{position:fixed;top:0;right:0;bottom:0;width:min(580px,100vw);background:var(--panel);border-left:1px solid var(--line);box-shadow:-4px 0 18px rgba(0,0,0,.12);transform:translateX(105%);transition:transform .16s ease-out;z-index:20;overflow-y:auto;overscroll-behavior:contain}
 #drawer.open{transform:none}
 .dbar{position:sticky;top:0;display:flex;justify-content:flex-end;padding:6px 10px;background:var(--panel);border-bottom:1px solid var(--line2)}
@@ -2013,6 +2247,44 @@ $$('.filters[data-filter-for]').forEach(function(box){
     applyFilters(box);
   });
 });
+// 개요: 격자 접기(기억) · 모듈 거르기 · 격자 노드 → 보드 카드 표시 · 투입 명령 복사
+var ovb=$('#ov-board'),ovd=$('#ov-dag'),ovf=$('#ov-filter');
+if(ovd){
+  try{if(localStorage.getItem('%%STORE%%-ovdag')==='0')ovd.removeAttribute('open')}catch(_){}
+  ovd.addEventListener('toggle',function(){try{localStorage.setItem('%%STORE%%-ovdag',ovd.open?'1':'0')}catch(_){}});
+}
+function ovFilter(mod){
+  if(!ovb)return;
+  if(ovf)$$('button[data-mod]',ovf).forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.mod===mod))});
+  $$('.kcol',ovb).forEach(function(col){
+    var n=0;$$('.kc',col).forEach(function(c){var ok=mod==='all'||c.dataset.product===mod;c.hidden=!ok;if(ok)n++});
+    var k=$('.kcnt',col);if(k)k.textContent=String(n);
+    var e=$('.kempty',col);if(e)e.hidden=n>0;
+  });
+  if(ovd)$$('.mg [data-product]',ovd).forEach(function(c){c.classList.toggle('dim',mod!=='all'&&c.dataset.product!==mod)});
+}
+if(ovf)ovf.addEventListener('click',function(e){var b=e.target.closest('button[data-mod]');if(b)ovFilter(b.dataset.mod)});
+function ovPick(id){
+  if(ovd)$$('.mn',ovd).forEach(function(n){n.setAttribute('aria-pressed',String(n.dataset.id===id))});
+  if(!ovb)return;
+  var card=null;$$('.kc',ovb).forEach(function(c){var on=c.dataset.id===id;c.classList.toggle('hl',on);if(on)card=c});
+  if(card&&card.hidden)ovFilter('all');
+  if(card){try{card.scrollIntoView({block:'nearest',inline:'nearest',behavior:'smooth'})}catch(_){card.scrollIntoView()}}
+}
+if(ovd)ovd.addEventListener('click',function(e){var n=e.target.closest('.mn');if(n)ovPick(n.getAttribute('aria-pressed')==='true'?null:n.dataset.id)});
+function copyText(s,btn){
+  var o=btn.textContent;
+  function done(){btn.textContent='복사됨';setTimeout(function(){btn.textContent=o},1500)}
+  function fallback(){
+    var ta=document.createElement('textarea');ta.value=s;ta.setAttribute('readonly','');ta.style.position='fixed';ta.style.opacity='0';
+    document.body.appendChild(ta);ta.select();
+    var ok=false;try{ok=document.execCommand('copy')}catch(_){}
+    document.body.removeChild(ta);
+    if(ok)done();else window.prompt('명령을 복사하세요',s);
+  }
+  if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(s).then(done,fallback)}else fallback();
+}
+if(ovb)ovb.addEventListener('click',function(e){var b=e.target.closest('.kcopy');if(b)copyText(b.dataset.cmd,b)});
 // 로컬 서버로 열었을 때 새 빌드 감지
 var BID=(document.querySelector('meta[name=build-id]')||{}).content;
 if(/^https?:$/.test(location.protocol)&&BID){

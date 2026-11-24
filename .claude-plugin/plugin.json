@@ -1,0 +1,14 @@
+{
+  "name": "orca-orchestration-kit",
+  "description": "Orca 다중 세션(마스터 → 매니저 → 요구사항당 작업 세션) 개발 워크플로 키트: 작업 DAG·웨이브, 브랜치·머지 규약, 번호 문서, 대시보드, 모델 자동 라우팅",
+  "author": {
+    "name": "orchestration-kit"
+  },
+  "keywords": [
+    "orca",
+    "orchestration",
+    "multi-agent",
+    "workflow",
+    "dag"
+  ]
+}

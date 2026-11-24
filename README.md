@@ -6,9 +6,11 @@ AI 에이전트 다중 세션으로 소프트웨어를 개발하는 워크플로
 - 세션 3계층: **마스터**(사용자 소통·결정) → **작업관리 매니저**(Orca Run 운영) → **작업 세션**(요구사항 1개 = 세션 1개)
 - 작업 DAG와 웨이브: W0 계약 → G-0 기반 머지 → W1 요구사항(병렬) → W2 모듈 통합 → W3 체계 통합
 - 브랜치·머지 규약, 쓰기 범위 소유권, 번호 문서 체계, 요구사항 추적(RTM)·TBD·증적, 과정 기록 3종
-- 단일 HTML 대시보드(오프라인), 실행 격리 모듈(선택), 검토 단계 모듈(선택)
+- 모델 자동 라우팅: 작업 난이도에 맞춰 구독 CLI(Claude·Codex·Antigravity·Grok)·모델·effort를 고르고 실적으로 학습
+- 단일 HTML 대시보드(오프라인, 작업 보드), 실행 격리 모듈(선택), 검토 단계 모듈(선택)
+- 배포: Claude Code 플러그인 마켓플레이스(자동 업데이트) 또는 심볼릭 링크
 
-버전: **v0.4.1** (2026-11-16)
+버전: **v0.5.0** (2026-11-24)
 
 ---
 
@@ -50,14 +52,34 @@ AI 에이전트 다중 세션으로 소프트웨어를 개발하는 워크플로
 
 ## 2. 빠른 시작
 
-### 2.1 스킬 설치 (심볼릭 링크)
+### 2.1 설치
+
+**A. 플러그인 마켓플레이스 (사용자용, 권장)**: 이 저장소에 push된 새 커밋을 자동으로 받는다. `<owner>/orca-orchestration-kit`은 이 저장소의 GitHub 주소(소유자/이름)로 바꿔 쓴다.
+```
+/plugin install orca-orchestration-kit --marketplace <owner>/orca-orchestration-kit
+```
+Claude Code 2.1.275 이전이면 두 단계로 한다:
+```
+/plugin marketplace add <owner>/orca-orchestration-kit
+/plugin install orca-orchestration-kit@orca-kit
+```
+- **자동 업데이트는 한 번 켜야 한다.** `/plugin` → Marketplaces → `orca-kit` → auto-update 켜기. 켜면 세션을 시작할 때 새 커밋을 받는다. 켜지 않았으면 `/plugin marketplace update orca-kit`으로 받는다. 팀 플랜 관리자는 managed settings의 `extraKnownMarketplaces`에 `"autoUpdate": true`로 모두에게 켤 수 있다.
+- **버전:** `plugin.json`에 `version`을 두지 않았다. 그래서 커밋마다 새 판으로 본다(버전을 올리지 않아도 갱신된다).
+- **Orca 프로필:** Orca는 계정 프로필마다 Claude 설정 폴더가 따로다. 마스터로 쓸 프로필마다 한 번씩 설치한다.
+- **스킬 이름:** 플러그인 스킬은 `/orca-orchestration-kit:orca-orchestration-kit`이다. "orchestration kit init"처럼 말로 불러도 된다.
+- **프로젝트 파일은 따로 올린다:** 자동으로 바뀌는 것은 스킬과 키트 본체다. 각 프로젝트에 깔린 `orchestration/`은 `kit.py upgrade`(아래)로 반영한다.
+- 비공개 저장소로 바꾸면 사용자 머신에 git 자격 증명이 저장돼 있어야 한다(`gh auth login` → `gh auth setup-git`).
+
+**B. 심볼릭 링크 (키트를 고치는 사람용)**: 이 저장소를 직접 받아 링크를 건다. A와 함께 쓰면 스킬이 두 번 잡히므로 하나만 쓴다.
 ```bash
 ./install.sh --dry-run          # 어디에 걸리는지 확인
 ./install.sh                    # Orca 프로필: $ORCA_CLAUDE_CONFIG_DIR/skills/  · 일반 Claude Code: ~/.claude/skills/
 ./install.sh --dir ~/.claude/skills   # 경로 직접 지정
 ./install.sh --uninstall
 ```
-링크라서 이 저장소를 `git pull`하면 스킬도 바로 최신이 된다. 필요: Python 3 + PyYAML, git, (실행 격리) docker·rsync·ssh.
+링크라서 이 저장소를 `git pull`하면 스킬도 바로 최신이 된다.
+
+필요: Python 3 + PyYAML, git, (실행 격리) docker·rsync·ssh. 모델 자동 라우팅은 쓸 구독 CLI(claude·codex·agy·grok), JEV 난이도 판정(선택)은 `TYPESAFE_API_KEY`.
 
 ### 2.2 새 프로젝트에 적용
 Claude Code(마스터가 될 세션)에서: **"새 프로젝트를 오케스트레이션으로 시작"**, **"orchestration kit init"**, **"3계층 세션으로 개발"**.
@@ -108,16 +130,16 @@ orchestration/tools/dashboard/serve.sh --orca            # 대시보드
 |---|---|---|---|
 | 세션 체계 | `templates/sessions/` | `orchestration/sessions/`, `orchestration/templates/` | `MASTER.md`, `MANAGER.md`(상시 핵심), `procedures/merge-gate.md`·`review.md`(필요할 때 읽는 절차), `worker-spec.md`(L2), `integration-spec.md`(L1), `review-spec.md`(검토). 프로젝트 규칙은 `*.local.md` 덧붙임 |
 | 작업 DAG | `templates/orchestration/tasks.yaml`, `tools/` | `orchestration/` | 스키마 주석(`hold`·`agent/model/effort` 포함), `validate_dag.py`, `render_spec.py`(`--review`·`--retry`), `launch.sh`(=`launch.py`), `status.py`(정지 점검), `archive_tasks.py`, `task_status.py`, `cleanup_worker.sh`(4조건), `sync_main.sh` |
-| 모델 라우팅 | `tools/routing.py`, `models.py`, `model_catalog.yaml`, `templates/orchestration/models.yaml` | `orchestration/tools/`, `orchestration/models.yaml` | 작업마다 구독(Claude·Codex·Antigravity·Grok CLI, Orca `--agent`)·모델·effort 자동 선택. 난이도·태그 분류 → 능력·소모·속도·강점 점수 → 투입 결과 학습·검토 판정 반영, 구독별 동시 상한·쿨다운·교차 검토, Orca 사용량 집계 참고. 근거를 한 줄로 남긴다 |
+| 모델 라우팅 | `tools/routing.py`, `models.py`, `model_catalog.yaml`, `templates/orchestration/models.yaml` | `orchestration/tools/`, `orchestration/models.yaml` | 작업마다 구독(Claude·Codex·Antigravity·Grok CLI, Orca `--agent`)·모델·effort 자동 선택. 난이도·태그 분류 → 능력·소모·속도·강점 점수 → 투입 결과 학습·검토 판정 반영, 구독별 동시 상한·쿨다운·교차 검토, Orca 사용량 집계 참고. 근거를 한 줄로 남긴다. 선택: JEV 난이도 판정(`jev:`, 기본 꺼짐, shadow → live) |
 | 운영 보호 | `tools/` | `orchestration/tools/` | `slot.sh`(동시 실행 슬롯), `evidence_lint.py`(증적 위생), `hooks/pre-push` + `install_hooks.sh`(로컬 전용·보호 브랜치·배포 제한 파일) |
 | 구조·규약 | `templates/orchestration/README.md` | `orchestration/README.md` | 계층, 브랜치·머지, 웨이브, 쓰기 범위 소유권 표, 동시 실행, 완료 기준, 소통, 종료 정리 |
 | 공통 규칙 | `templates/AGENTS.md`, `CLAUDE.md` | 저장소 루트 | 개인 이메일 금지, 배포 제한 파일 금지, 컨테이너 빌드, 쓰기 범위 밖은 ask |
 | 문서 체계 | `templates/docs/` | `docs/` | 번호 폴더, 파일명·개정이력·보관 사본 규칙, RTM, TBD 관리대장, 증적 양식, 과정 기록 3종(프로세스·지표 / 의사결정 / 운영 이슈·교훈) |
 | 검토 단계 (선택) | `templates/docs/review-stages/` | `docs/01~04_*`, kit.yaml | 프리셋 `defense`(SRR/SFR/PDR/CDR), `product`(REQ/SPEC/DESIGN/RELEASE). 이름만 바꿔 쓰기 가능 |
-| 대시보드 | `tools/dashboard/` | `orchestration/tools/dashboard/` | 설정 기반 단일 HTML 생성기, `serve.sh`, `snapshot.sh`, systemd user 서비스 예시, `tailscale serve` 사설망 공개 절차 |
+| 대시보드 | `tools/dashboard/` | `orchestration/tools/dashboard/` | 설정 기반 단일 HTML 생성기. 개요는 작업 보드(현재 웨이브, 구독 칩, 접는 웨이브 × 모듈 격자, 모듈 거르기, 상태 열 카드에 배정 모델·투입 명령 복사), `serve.sh`, `snapshot.sh`, systemd user 서비스 예시, `tailscale serve` 사설망 공개 절차 |
 | 실행 격리 (선택) | `tools/run/` | `scripts/run/` | 워크트리별 컨테이너 + 전용 네트워크, 격리 변수 훅, 원격 실행(rsync → 원격 컨테이너 → 결과 회수, 배포 제한 패턴 제외), GPU 지정, HEAVY 슬롯(flock), 지표 수집 |
 | ROS 2 프로필 (선택) | `tools/run/profiles/ros2/` | `scripts/run/profiles/ros2/` | `ROS_DOMAIN_ID`·`GZ_PARTITION` 격리, setup 자동 source, colcon test 순차 |
-| 스킬 | `skills/orca-orchestration-kit/` | 사용자 스킬 경로(링크) | `SKILL.md`(흐름 고르기·status·이어받기), `references/init.md`·`upgrade.md`, `scripts/kit.py` |
+| 스킬 | `skills/orca-orchestration-kit/`, `.claude-plugin/` | 플러그인 캐시(마켓플레이스) 또는 사용자 스킬 경로(링크) | `SKILL.md`(흐름 고르기·status·이어받기), `references/init.md`·`upgrade.md`, `scripts/kit.py` |
 | 예제 | `examples/demo-project/` | - | 가상 "할 일 관리 웹앱"(모듈 2, 작업 6 + 게이트 1)에 적용한 결과: tasks.yaml, 렌더링된 명세 3개, 대시보드 |
 
 파일 배치의 정본은 [`kit-manifest.yaml`](kit-manifest.yaml)이다. `managed`는 키트 소유(upgrade 대상), `seed`는 한 번 깔고 프로젝트 소유다.
@@ -175,6 +197,7 @@ orchestration/tools/dashboard/serve.sh --orca            # 대시보드
 ## 5. 저장소 구조
 ```
 README.md  install.sh  kit-manifest.yaml  VERSION
+.claude-plugin/   plugin.json  marketplace.json   (플러그인 마켓플레이스 배포: 저장소 루트 = 플러그인)
 templates/
   AGENTS.md  CLAUDE.md
   sessions/       MASTER.md  MANAGER.md  procedures/{merge-gate,review}.md  worker-spec.md  integration-spec.md  review-spec.md
@@ -198,6 +221,7 @@ docs/                            VERIFY.md  DESIGN-NOTES.md  LESSONS.md
 
 | 버전 | 일자 | 내용 |
 |---|---|---|
+| v0.5.0 | 2026-11-24 | **플러그인 마켓플레이스 배포**(`.claude-plugin/`, 2.1절): `/plugin install`로 설치하고 auto-update를 켜면 push마다 자동 갱신(버전 미지정 = 커밋 추적). **대시보드 개요를 작업 보드로**(`docs/VERIFY.md` 11장): 현재 웨이브·머지 진행 막대, 구독 칩(동시 실행/상한·쿨다운·snap 제외·오늘 토큰), 접을 수 있는 웨이브 × 모듈 격자(노드를 누르면 보드 카드 표시, 접은 상태 기억), 모듈 거르기, 대기·착수 가능·진행·검토·머지 열 보드(카드에 배정 모델·경과 시간, 착수 가능 카드에 라우팅 예정 모델과 투입 명령 복사). 라우팅 정보는 models.yaml이 있을 때만, CLI를 새로 돌리지 않고 캐시만 읽는다. **JEV 난이도 판정(선택, 기본 꺼짐)**: `models.yaml jev.enabled`와 `TYPESAFE_API_KEY`가 있으면 작업 제목·완료 조건만 TypeSafe JEV에 보내 난이도를 한 번 더 본다. `mode: shadow`(기본)는 기록만 하고 `models.py stats`가 규칙 분류와 결과를 비교, `live`는 신뢰도 0.6 이상일 때 적용. 키·네트워크가 없거나 실패하면 규칙 분류만 쓴다 |
 | v0.4.1 | 2026-11-16 | Orca 실기동 반영(`docs/VERIFY.md` 10장): Orca에서 꺼진 에이전트(`agent_unconfigured`)는 쿨다운 후 다시 라우팅, snap 격리 설치본(워커가 orca CLI를 못 부름)은 라우팅에서 뺀다 |
 | v0.4.0 | 2026-11-16 | **모델 자동 라우팅**(`docs/DESIGN-NOTES.md` 6장). `launch.sh`가 agent/model 없는 작업을 분류(난이도 1~5·태그·임계 경로)해 구독 CLI(claude·codex·antigravity·grok)·모델·effort를 점수로 고른다. 카탈로그 `tools/model_catalog.yaml`(키트 소유) + 정책 `orchestration/models.yaml`(seed: 쓸 구독·목표·동시 상한·교차 검토·고정·덮어쓰기). 가용성은 각 CLI의 모델 목록으로 확인(`models.py discover`), 실적은 dispatch.tsv × tasks.yaml 결과 × 검토 판정(`models.py feedback`)으로 학습, 한도는 `models.py cooldown`, 사용량은 Orca 집계(`models.py stats`). tasks.yaml `difficulty`·`tags`·`objective`·`route` 추가, dispatch.tsv 칸 추가(에이전트·모델·effort·키·난이도), status.py에 구독별 진행 수·쿨다운. **기존 설치본:** upgrade하면 models.yaml이 새로 생기고 라우팅이 켜진다(끄려면 `routing.enabled: false`). 검증: `docs/VERIFY.md` 9장 |
 | v0.3.0 | 2026-11-12 | 효율 검토 반영(`docs/DESIGN-NOTES.md` 4장, 교훈 L-14 ~ L-19). **결함:** upgrade가 키트 밖 파일을 덮어쓰던 것(→ `.kit-new`), status·cleanup의 진행 워커 오판·100개 잘림, launch가 선행·status를 안 보던 것, bootstrap `all`이 기동 보고 전에 abandon하던 것, 매니저 기동에 기존 워크트리 생성 플래그(`--display-name`), sync_main의 체크아웃 전환·자동 push. **효율:** 워커 고정 읽기 축소(AGENTS '읽을 것'), merged 보관(`archive_tasks.py`), MANAGER 분할(`procedures/`), SKILL 분할(`references/`), 정지 점검 도구(`status.py`, `hold`), 작업별 `agent/model/effort`, `launch.sh --review/--retry`, `slot.sh`, `evidence_lint.py`, pre-push 훅, 로컬 전용 운영(`project.git_remote`), 덧붙임 파일(`*.local.md`), upgrade 3방향 자동 병합·새 버전 알림, 회귀 시험 `tests/smoke.sh`. **기존 설치본:** `upgrade` 미리보기 → 로컬 전용이었으면 kit.yaml에 `git_remote: ""`부터 넣는다(`references/upgrade.md`). 검증: `docs/VERIFY.md` 8장 |
