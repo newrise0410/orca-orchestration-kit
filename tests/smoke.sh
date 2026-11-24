@@ -52,6 +52,17 @@ T=orchestration/tools
 
 echo "[2] DAG·렌더링"
 check "validate_dag 오류 0" python3 $T/validate_dag.py -q
+# W0 초안: 기획(F-00a, hold) → 유사 오픈소스 조사·반영(F-00b) → 계약(F-01)
+check "W0 초안: 기획 → 유사 오픈소스 조사 → 계약 순서" python3 -c "
+import yaml; t={x['id']:x for x in yaml.safe_load(open('orchestration/tasks.yaml'))['tasks']}
+assert t['F-00a']['deps']==[] and t['F-00a'].get('hold') and t['F-00b']['deps']==['F-00a'] and t['F-01']['deps']==['F-00b']
+assert t['F-00b']['write_scope']==t['F-00a']['write_scope'] and all(p.startswith('docs/') for p in t['F-00a']['write_scope'])"
+check "tasks.yaml에 YAML 앵커(&·*)가 없음" bash -c "! grep -nE '(: |- )[&*]id[0-9]' orchestration/tasks.yaml"
+check "기획이 보류면 투입 가능 작업 없음" test -z "$(python3 $T/render_spec.py --list-ready)"
+o=$(KIT_RUN=run_x $T/launch.sh --dry-run F-00a 2>&1); check "F-00a는 hold라 투입 보류" has "$o" "보류 중"
+o=$(KIT_RUN=run_x $T/launch.sh --dry-run F-01 2>&1); check "F-01은 조사(F-00b) 전에는 보류" has "$o" "선행 미완료"
+check "F-00b는 조사 태그로 분류" bash -c "python3 $T/models.py route F-00b 2>&1 | grep -q '태그.*research'"
+for i in F-00a F-00b; do python3 $T/task_status.py $i merged >/dev/null; done
 python3 $T/render_spec.py F-01 >/dev/null
 check "F-01 명세: 로컬 push 명령" grep -q 'git push . HEAD:int/common' orchestration/specs/F-01.md
 check "F-01 명세: 큰 문서 선독 지시 없음" bash -c "! grep -q 'orchestration/README.md\`(구조)를 읽어라' orchestration/specs/F-01.md"
@@ -88,10 +99,10 @@ echo "[4] 보관 (archive_tasks)"
 before=$(python3 -c "import yaml;print(len(yaml.safe_load(open('orchestration/tasks.yaml'))['tasks']))")
 check "archive 실행" python3 $T/archive_tasks.py
 after=$(python3 -c "import yaml;print(len(yaml.safe_load(open('orchestration/tasks.yaml'))['tasks']))")
-check "tasks.yaml에서 merged 4개가 빠짐" test $((before-after)) -eq 4
+check "tasks.yaml에서 merged 6개가 빠짐" test $((before-after)) -eq 6
 check "보관 뒤 validate 오류 0" python3 $T/validate_dag.py -q
 check "보관 뒤 I-API 투입 가능 유지" bash -c "python3 $T/render_spec.py --list-ready | grep -qx I-API"
-check "status.py --no-orca" bash -c "python3 $T/status.py --no-orca | grep -q '보관 4'"
+check "status.py --no-orca" bash -c "python3 $T/status.py --no-orca | grep -q '보관 6'"
 check "대시보드가 보관 작업까지 읽음" bash -c "python3 $T/dashboard/build.py --out $W/dash.html >/dev/null 2>&1 && grep -q 'F-01' $W/dash.html"
 git add -A && git commit -qm "[L0] archive"
 
