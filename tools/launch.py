@@ -227,15 +227,29 @@ def main(argv=None):
         if code != 0 or not otid:
             print(f"  task-create 실패: {out.strip()[:400]}", file=sys.stderr)
             return 1
-        ws = [orca(), "orchestration", "worker-start", "--run", run_id, "--task", otid, "--agent", agent]
-        if model:
-            ws += ["--model", str(model)] + (["--effort", str(effort)] if effort else [])
-        ws += ["--worktree", a.worktree]
-        if new_wt:   # 생성 플래그는 새 워크트리에만 (기존 워크트리에 주면 Orca가 거부한다)
-            ws += (["--repo", repo_sel] if repo_sel else []) + ["--base-branch", base, "--name", name, "--display-name", title]
-        ws += (["--keep-open"] if keep else []) + ["--json"]
-        code, out = run(ws, a.dry_run)
-        did = first(r"ctx_[0-9a-f]+", out) or ("<dispatch>" if a.dry_run else "")
+        for attempt in (1, 2):
+            ws = [orca(), "orchestration", "worker-start", "--run", run_id, "--task", otid, "--agent", agent]
+            if model:
+                ws += ["--model", str(model)] + (["--effort", str(effort)] if effort else [])
+            ws += ["--worktree", a.worktree]
+            if new_wt:   # 생성 플래그는 새 워크트리에만 (기존 워크트리에 주면 Orca가 거부한다)
+                ws += (["--repo", repo_sel] if repo_sel else []) + ["--base-branch", base, "--name", name, "--display-name", title]
+            ws += (["--keep-open"] if keep else []) + ["--json"]
+            code, out = run(ws, a.dry_run)
+            did = first(r"ctx_[0-9a-f]+", out) or ("<dispatch>" if a.dry_run else "")
+            # Orca에서 꺼진 에이전트: 워커를 만들기 전에 거부된다. 자동 라우팅이었으면 그 구독을 빼고 한 번 더 고른다.
+            if code != 0 and not did and "agent_unconfigured" in out:
+                routing.write_cooldown(repo, agent, 24 * 60, "Orca에서 꺼진 에이전트(Orca 설정에서 켠 뒤 models.py cooldown --clear)")
+                print(f"  {agent}: Orca에서 꺼져 있다 → 24시간 쿨다운", file=sys.stderr)
+                if attempt == 1 and rkey and not pinned:
+                    dec = routing.route(repo, cfg, tid, tasks, mode, live_dids=live, catalog=catalog, pol=pol,
+                                        extra_running=launched)
+                    if dec.get("key"):
+                        agent, model, effort = dec["agent"], dec["model"], dec["effort"]
+                        rkey, rdiff = dec["key"], f"{dec['difficulty']:.1f}"
+                        print(f"  다시 라우팅: {routing.describe(dec)}")
+                        continue
+            break
         if code != 0 or not did:
             print(f"  worker-start 실패({otid}). 다시 실행하지 말고 failedStage를 확인하라:\n{out.strip()[:1200]}", file=sys.stderr)
             return 1

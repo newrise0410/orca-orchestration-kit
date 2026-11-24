@@ -27,6 +27,9 @@ routing:
   pin: {}                      # 고정 (예: {review: codex-sol, L1: claude-opus}). 쓸 수 없으면 무시
   daily_soft_tokens: {}        # 하루 출력 토큰 기준(Orca 집계, 모든 프로젝트 합). 넘으면 벌점 (예: {claude: 2000000})
 
+# 에이전트 설정 덮어쓰기 (예: snap 격리 설치본이 orca CLI를 부를 수 있게 손봤다면 antigravity: {allow_confined: true})
+agents: {}
+
 # 카탈로그 덮어쓰기·추가 (같은 꼴, 키 단위 병합). 새 모델은 models.py discover의 '카탈로그에 없는 모델'에서 고른다.
 #   claude-opus: {cost: 3}
 #   codex-sol-fast: {agent: codex, model: gpt-6.1-sol, quality: 4, speed: 4, cost: 3, efforts: [low, medium], strengths: [coding]}

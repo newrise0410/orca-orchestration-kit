@@ -122,4 +122,5 @@
 - **탐색(일부러 다른 모델에 맡겨 보기)은 하지 않는다.** 결과가 쌓이는 모델만 학습된다. 비교가 필요하면 `pin`·`prefer`로 잠시 바꾼다.
 - **구독 계정 전환은 하지 않는다.** `orca account select`는 호스트 전체 설정이라 동시 투입과 사용자 세션에 번진다. 한도는 구독 단위 쿨다운으로 다룬다. 한도 감지는 사람(매니저)이 워커 보고·화면으로 하고 `cooldown`을 건다(자동 감지는 다음 후보).
 - **Orca 사용량 파일**(`~/.config/orca/orca-{claude,codex}-usage.json`)은 Orca 내부 형식이다. 모델·날짜별 출력 토큰 합만 읽고, 형식이 바뀌면 조용히 빈 값으로 둔다. Antigravity·Grok은 집계가 없다.
+- **실기동에서 드러난 것(v0.4.1):** Orca에서 꺼진 에이전트는 `worker-start`가 `agent_unconfigured`로 거부한다 → launch가 그 구독을 쿨다운하고 한 번 다시 라우팅한다. snap으로 깐 `agy`는 AppArmor 격리 때문에 `$HOME`의 숨김 폴더에 있는 Orca CLI 심을 실행하지 못해 `worker_done`·`ask`를 보낼 수 없다 → discover가 snap 설치본을 표시하고 라우팅에서 뺀다(`agents.<id>.allow_confined`로 풀 수 있다). Antigravity는 작업 폴더 신뢰가 필요하고, snap 설치본은 신뢰 목록도 `~/snap/antigravity-cli/common/.gemini/…`에서 읽는다(키트는 신뢰를 대신 주지 않는다).
 - **다음 후보:** 워커 화면에서 한도 문구를 찾아 쿨다운을 자동으로 거는 것(status.py), 작업 소요 시간(투입 → merged) 학습, 대시보드 모델 배분 탭.

@@ -39,7 +39,8 @@ def cmd_discover(a):
     for ag, info in disc.items():
         ms = info.get("models")
         st = "CLI 없음" if not info.get("bin") else (f"모델 {len(ms)}개" if ms is not None else "모델 목록 없음(별칭을 믿는다)")
-        print(f"- {ag}: {st}" + (f" · {info['error']}" if info.get("error") else ""))
+        conf = " · snap 격리(워커로 못 씀)" if info.get("confined") else ""
+        print(f"- {ag}: {st}{conf}" + (f" · {info['error']}" if info.get("error") else ""))
     print("\n# 카탈로그 모델")
     known = set()
     for key, m in catalog["models"].items():
