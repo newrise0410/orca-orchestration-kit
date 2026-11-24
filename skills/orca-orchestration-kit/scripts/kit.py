@@ -261,12 +261,28 @@ def w0_tasks(ans, v):
     mods = ans["modules"]
     iface = "docs/02_interface/" if not ans.get("review_preset") or ans["review_preset"] == "none" \
         else f"docs/{review_preset(ans['review_preset'])[1]['folder']}/"
+    stages = review_preset(ans.get("review_preset"))
+    folders = [s["folder"] for s in stages] if stages else DEFAULT_FOLDERS
+    plan_docs = [f"docs/{f}/" for f in folders[:3]]            # 요구 · 인터페이스(기능 정의) · 설계
     T = []
 
     def task(**kw):
         T.append(kw)
+    # 계약 앞의 기획 두 단계. 요구·설계가 이미 있는 프로젝트는 F-00a를 지우거나 merged로 두되 F-00b는 거친다
+    task(id="F-00a", title="기획 (요구 정리·기능 정의·구조 설계 초안)", layer="L0", module="common", reqs=[],
+         branch="int/common", base=main, deps=[], write_scope=list(plan_docs),
+         acceptance="사용자 요구(인터뷰·요구 문서)를 요구사항 추적표(요구 ID·검증 단계)와 TBD 관리대장에 반영하고, 기능 정의와 구조 설계 "
+                    "초안(모듈 책임·경계, 기술 스택 후보, 모듈 구성안 비교)을 문서화한다. 요구사항마다 W1 작업 초안(ID·모듈·완료 판정)을 제안한다.",
+         hold="사용자 요구 확인 대기 (마스터가 요구를 specs/F-00a.extra.md로 넘긴 뒤 푼다)", status="todo")
+    task(id="F-00b", title="유사 오픈소스 조사·반영", layer="L0", module="common", reqs=[],
+         branch="int/common", base=main, deps=["F-00a"], write_scope=list(plan_docs),
+         acceptance="기획(F-00a)과 겹치는 공개 프로젝트를 범주가 한쪽에 몰리지 않게 조사한다. 프로젝트마다 저장소 주소, 라이선스, 최근 활동, "
+                    "기술 스택, 겹치는 요구, 배울 점, 프로젝트 제약과 맞지 않는 점을 적고 확인하지 못한 것은 미확인으로 둔다. 요구별로 직접 구현·"
+                    "가져다 쓰기·설계만 참고를 판단하고, 기존 프로젝트를 토대로 삼는 안을 직접 구현과 비교한다(가져다 쓸 때의 라이선스 의무 포함). "
+                    "문서 보강은 반영하고, 사용자 결정이 필요한 변경(범위·모듈 구성·토대 프로젝트 채택·기술 스택의 큰 방향)은 제안 목록으로 낸다.",
+         status="todo")
     task(id="F-01", title="계약 정의 (모듈 간 인터페이스·스키마·공통 규약)", layer="L0", module="common", reqs=[],
-         branch="int/common", base=main, deps=[], write_scope=["contracts/", iface],
+         branch="int/common", base=main, deps=["F-00b"], write_scope=["contracts/", iface],
          acceptance="모듈 사이의 모든 인터페이스(요청·응답·이벤트·오류 형식)와 공통 규약(이름, 시각, 식별자, 로그 형식)을 "
                     "정의·문서화하고 계약 검사(스키마 검증·코드 생성)가 통과한다.", status="todo")
     task(id="F-02", title="공통 라이브러리 (로그·설정·헬스·오류 처리·처리시간 측정)", layer="L0", module="common", reqs=[],
@@ -297,7 +313,8 @@ def w0_tasks(ans, v):
           f"  #   title: (요구 요약)\n  #   layer: L2\n  #   module: {m0['key']}\n  #   reqs: [R-{m0['short'].upper()}-001]\n"
           f"  #   branch: req/R-{m0['short'].upper()}-001\n  #   base: int/{m0['key']}\n  #   deps: [G-0]\n"
           f"  #   write_scope: [{m0['key']}/<기능>/]\n  #   acceptance: \"(측정 가능한 완료 판정)\"\n  #   perf: false\n  #   status: todo\n")
-    return header + "# W0 초안 — init이 만들었다. 프로젝트에 맞게 경로·acceptance를 고치고 W1 작업을 채운다.\n" + body + w1
+    return header + ("# W0 초안 — init이 만들었다. 프로젝트에 맞게 경로·acceptance를 고치고 W1 작업을 채운다.\n"
+                     "# 순서: 기획(F-00a) → 유사 오픈소스 조사·반영(F-00b) → 계약(F-01). 개발 착수 전에 F-00b의 사용자 결정 사항을 확정한다.\n") + body + w1
 
 
 # ─────────────────────────── init ───────────────────────────
