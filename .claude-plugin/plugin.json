@@ -10,5 +10,6 @@
     "multi-agent",
     "workflow",
     "dag"
-  ]
+  ],
+  "license": "Apache-2.0"
 }
