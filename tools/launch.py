@@ -24,6 +24,7 @@ import argparse
 import contextlib
 import datetime as dt
 import io
+import json
 import os
 import re
 import shlex
@@ -88,6 +89,26 @@ def live_dispatches(run_id, dry):
 def first(pattern, text):
     m = re.search(pattern, text or "")
     return m.group(0) if m else ""
+
+
+def orca_id(out, keys, pattern):
+    """Orca --json 출력에서 ID를 JSON으로 읽는다(result.<키>, result.task.id 등). JSON이 아니면 정규식으로 찾는다."""
+    txt = (out or "").strip()
+    for cand in (txt, txt.split("\n\n")[0], txt.splitlines()[0] if txt else ""):
+        try:
+            d = json.loads(cand)
+        except (ValueError, TypeError):
+            continue
+        r = d.get("result") if isinstance(d, dict) else None
+        if isinstance(r, dict):
+            for k in keys:
+                v = r.get(k)
+                if isinstance(v, dict):
+                    v = v.get("id")
+                if isinstance(v, str) and re.fullmatch(pattern, v):
+                    return v
+        break
+    return first(pattern, txt)
 
 
 def main(argv=None):
@@ -246,7 +267,7 @@ def main(argv=None):
         # ── Orca
         code, out = run([orca(), "orchestration", "task-create", "--run", run_id, "--spec-file", spec,
                          "--task-title", title, "--display-name", title, "--json"], a.dry_run)
-        otid = first(r"task_[0-9a-f]+", out) or ("<task_id>" if a.dry_run else "")
+        otid = orca_id(out, ("id", "taskId", "task"), r"task_[0-9A-Za-z]+") or ("<task_id>" if a.dry_run else "")
         if code != 0 or not otid:
             print(f"  task-create 실패: {out.strip()[:400]}", file=sys.stderr)
             return 1
@@ -259,7 +280,7 @@ def main(argv=None):
                 ws += (["--repo", repo_sel] if repo_sel else []) + ["--base-branch", base, "--name", name, "--display-name", title]
             ws += (["--keep-open"] if keep else []) + ["--json"]
             code, out = run(ws, a.dry_run)
-            did = first(r"ctx_[0-9a-f]+", out) or ("<dispatch>" if a.dry_run else "")
+            did = orca_id(out, ("dispatchId", "dispatch", "id"), r"ctx_[0-9A-Za-z]+") or ("<dispatch>" if a.dry_run else "")
             # Orca에서 꺼진 에이전트: 워커를 만들기 전에 거부된다. 자동 라우팅이었으면 그 구독을 빼고 한 번 더 고른다.
             if code != 0 and not did and "agent_unconfigured" in out:
                 routing.write_cooldown(repo, agent, 24 * 60, "Orca에서 꺼진 에이전트(Orca 설정에서 켠 뒤 models.py cooldown --clear)")
@@ -276,17 +297,23 @@ def main(argv=None):
             break
         if code != 0 or not did:
             print(f"  worker-start 실패({otid}). 다시 실행하지 말고 failedStage를 확인하라:\n{out.strip()[:1200]}", file=sys.stderr)
+            if not a.dry_run and otid:   # task-create만 되고 워커가 없으면 Orca에 고아 Task가 남는다 → 취소로 닫는다
+                c2, o2 = run([orca(), "orchestration", "task-update", "--run", run_id, "--id", otid, "--status", "failed",
+                              "--result", "cancelled", "--json"], False)
+                print(f"  Orca Task {otid}: " + ("취소로 닫았다(worker-start 실패)" if c2 == 0 else f"닫지 못했다 — 손으로 task-update ({o2.strip()[:160]})"),
+                      file=sys.stderr)
             return 1
         if a.dry_run:
             print(f"  (dry-run) dispatch.tsv 기록" + (", tasks.yaml status running" if mode == "new" else ""))
             launched[agent] = launched.get(agent, 0) + 1
             continue
-        with open(repo / "orchestration/state/dispatch.tsv", "a", encoding="utf-8") as f:
-            f.write("\t".join([title, otid, did, name, dt.datetime.now().strftime("%F %T"),
-                               agent, str(model or ""), str(effort or ""), rkey, rdiff, rjev]) + "\n")
+        with kitlib.locked(repo):   # 매니저·quota_switch·다른 launch가 같은 파일을 동시에 고치지 않게
+            with open(repo / "orchestration/state/dispatch.tsv", "a", encoding="utf-8") as f:
+                f.write("\t".join([title, otid, did, name, dt.datetime.now().strftime("%F %T"),
+                                   agent, str(model or ""), str(effort or ""), rkey, rdiff, rjev]) + "\n")
+            if mode == "new" and tid in active:
+                tpath.write_text(task_status.set_status(tpath.read_text(encoding="utf-8"), tid, "running"), encoding="utf-8")
         launched[agent] = launched.get(agent, 0) + 1
-        if mode == "new" and tid in active:
-            tpath.write_text(task_status.set_status(tpath.read_text(encoding="utf-8"), tid, "running"), encoding="utf-8")
         print(f"  {title} {otid} {did}")
     return rc
 

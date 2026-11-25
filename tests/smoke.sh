@@ -137,6 +137,11 @@ check "깨끗한 증적 0건" python3 $T/evidence_lint.py
 printf 'log /home/someone/src/x\nPATH=/usr/bin\n' > docs/06_evidence/F-01/run.log
 check "홈 경로·PATH 덤프 잡음" bash -c "! python3 $T/evidence_lint.py"
 rm -f docs/06_evidence/F-01/run.log
+printf 'a@example.com b@sub.example.com\n' > docs/06_evidence/F-01/ok.md
+check "이메일 허용 도메인: example.com·하위 도메인은 통과" python3 $T/evidence_lint.py docs/06_evidence/F-01/ok.md
+printf 'c@notexample.com\n' > docs/06_evidence/F-01/bad.md
+check "이메일 허용 도메인: notexample.com은 걸린다(끝 글자만 맞는 도메인)" bash -c "! python3 $T/evidence_lint.py docs/06_evidence/F-01/bad.md"
+rm -f docs/06_evidence/F-01/ok.md docs/06_evidence/F-01/bad.md
 check "slot.sh 실행" bash -c "$T/slot.sh test -- true"
 
 echo "[8] bootstrap · cleanup"
@@ -399,7 +404,10 @@ if "inbox" in a:
 if "worker-stop" in a or "worker-release" in a or a.startswith("orchestration send"): out({"ok": True, "result": {}})
 if a.startswith("automations create"): out({"ok": True, "result": {"automation": {"id": "auto-1", "enabled": True}}})
 if a.startswith("automations show"): out({"ok": True, "result": {"automation": {"id": "auto-1", "name": "t", "enabled": True}}})
-if a.startswith("automations remove"): out({"ok": True, "result": {}})
+if a.startswith("automations remove") or a.startswith("automations edit"): out({"ok": True, "result": {}})
+if a.startswith("automations runs"):
+    st = os.environ.get("FAKE_SW_RUNS", "skipped_precheck")
+    out({"ok": True, "result": {"runs": [{"id": "r1", "status": st, "scheduledFor": 9999999999999}]}})
 if "task-create" in a: out({"ok": True, "result": {"id": "task_abc777"}})
 if "worker-start" in a: out({"ok": True, "result": {"dispatchId": "ctx_def777", "state": "ready"}})
 print('{"ok":false}'); sys.exit(1)
@@ -465,6 +473,9 @@ check "watch precheck: 같은 내용은 다시 알리지 않음" bash -c "! $SW 
 o=$($SW python3 $T/quota_watch.py install --every 10 2>&1)
 check "watch install: Orca 예약 실행(10분, 사전 확인 절대 경로) 등록·기록" bash -c 'grep -q "등록: .* (auto-1)" <<<"$0" && grep -q -- "automations create .*--trigger \*/10 \* \* \* \* .*--precheck cd .* && ORCA_CLI_COMMAND=.* orchestration/tools/quota_watch.py precheck" "$1/calls.log" && grep -q auto-1 orchestration/state/quota_watch.json' "$o" "$W/sw"
 o=$($SW python3 $T/quota_watch.py install 2>&1); check "watch install: 이미 있으면 다시 만들지 않음" has "$o" "이미 등록됨"
+: > "$W/sw/calls.log"
+FAKE_SW_RUNS=completed $SW python3 $T/quota_watch.py precheck; rc=$?
+check "watch 안전장치: 예약 실행이 에이전트를 띄웠으면 스스로 끄고 알린다(사전 확인은 그래도 1)" bash -c 'test "$2" = 1 && grep -q "automations edit --id auto-1 --disabled" "$1/calls.log" && grep -q "subject 한도 점검 예약을 껐다" "$1/calls.log" && grep -q guard_disabled orchestration/state/quota_watch.json' "" "$W/sw" "$rc"
 o=$($SW python3 $T/quota_watch.py remove 2>&1); check "watch remove" bash -c 'grep -q "지움: auto-1" <<<"$0" && ! grep -q auto-1 orchestration/state/quota_watch.json' "$o"
 rm -f orchestration/state/quota_cache.json orchestration/state/quota_watch.json
 rm -f orchestration/state/quota_cache.json
@@ -634,6 +645,42 @@ cfg=kitlib.load_config('.'); _,t=kitlib.all_tasks('.',cfg)
 d=routing.route('.',cfg,'X-GU',t,'review',quota={},exclude_keys={'codex-sol'})
 assert d['excluded'].get('codex-sol','').startswith('검토 독립성'), d['excluded']"
 rm -f orchestration/checklist.md
+# 코드 검토 지적: pre-push가 설정을 못 읽으면 막는다 · cleanup은 워커 목록 페이지를 넘긴다 · launch는 ID를 JSON으로·쓰기 잠금·고아 Task 닫기 · 예약 점검 안전장치
+HG="$W/hookrepo"; rm -rf "$HG"; git init -q -b main "$HG" && git -C "$HG" commit -q --allow-empty -m r
+sha=$(git -C "$HG" rev-parse HEAD); HOOK="$PWD/$T/hooks/pre-push"
+o=$(cd "$HG" && printf 'refs/heads/main %s refs/heads/main 0000000000000000000000000000000000000000\n' "$sha" | python3 "$HOOK" origin https://x.invalid/r.git 2>&1; echo "rc=$?")
+check "pre-push: kit.yaml을 못 읽으면 막는다(이유 출력)" bash -c 'grep -q "설정을 읽지 못해 push를 막았다" <<<"$0" && grep -q "rc=1" <<<"$0"' "$o"
+check "pre-push: KIT_HOOK_NO_CONFIG_OK=1이면 통과" bash -c "cd $HG && printf 'refs/heads/main $sha refs/heads/main 0000000000000000000000000000000000000000\n' | KIT_HOOK_NO_CONFIG_OK=1 python3 $HOOK origin https://x.invalid/r.git"
+cat > "$W/fake-orca-pg.py" <<'PY'
+import json, os, sys
+a = " ".join(sys.argv[1:]); open(os.environ["FAKE_PG_LOG"], "a").write(a + "\n")
+def out(o): print(json.dumps(o, indent=2)); sys.exit(0)
+if "worker-list" in a:
+    if "--cursor c2" in a:
+        out({"ok": True, "result": {"workers": [{"dispatchId": "ctx_live99", "state": "running", "workspace": "ws::" + os.environ["FAKE_PG_WS"]}]}})
+    out({"ok": True, "result": {"workers": [{"dispatchId": f"ctx_d{i}", "state": "succeeded", "workspace": f"ws::/tmp/other{i}"} for i in range(100)],
+                                "nextCursor": "c2"}})
+if "task-create" in a: out({"ok": True, "result": {"task": {"id": "task_Zx91"}, "note": "ctx_wrong1 task_wrong2"}})
+if "worker-start" in a: print(json.dumps({"ok": False, "error": {"code": "agent_readiness", "message": "timeout"}, "failedStage": "agent_readiness"})); sys.exit(1)
+if "task-update" in a: out({"ok": True, "result": {}})
+print('{"ok":false}'); sys.exit(1)
+PY
+printf '#!/bin/sh\nexec python3 %s "$@"\n' "$W/fake-orca-pg.py" > "$W/fake-orca-pg"; chmod +x "$W/fake-orca-pg"
+export FAKE_PG_LOG="$W/pg.log" FAKE_PG_WS="$W/x-cl"; : > "$W/pg.log"
+o=$(ORCA_CLI_COMMAND="$W/fake-orca-pg" $T/cleanup_worker.sh --dry-run x-cl req/X-CL int/api 2>&1)
+check "cleanup: 워커 목록 둘째 쪽의 끝나지 않은 디스패치도 본다(100개 넘는 Run)" bash -c 'grep -q "끝나지 않은 디스패치 ctx_live99" <<<"$0" && grep -q -- "--cursor c2" "$1"' "$o" "$W/pg.log"
+: > "$W/pg.log"
+o=$(ORCA_CLI_COMMAND="$W/fake-orca-pg" KIT_RUN=run_x KIT_NO_CLI_UPDATE=1 $T/launch.sh --force --agent claude X-DOC 2>&1)
+check "launch: Task ID는 JSON(result.task.id) · worker-start 실패면 고아 Task를 취소로 닫는다" bash -c 'grep -q "worker-start 실패(task_Zx91)" <<<"$0" && grep -q "orchestration task-update --run run_x --id task_Zx91 --status failed --result cancelled" "$1" && grep -q "취소로 닫았다" <<<"$0"' "$o" "$W/pg.log"
+check "쓰기 잠금: 같은 이름 잠금은 차례로 · 잠금 파일은 무시 목록" bash -c "python3 -c \"
+import sys,threading,time; sys.path.insert(0,'$T'); import kitlib
+order=[]
+def w(n):
+    with kitlib.locked('.'):
+        order.append(n+'+'); time.sleep(0.2); order.append(n+'-')
+ts=[threading.Thread(target=w,args=(x,)) for x in 'ab']; [t.start() for t in ts]; [t.join() for t in ts]
+assert order[1].endswith('-') and order[3].endswith('-'), order\" && grep -q 'orchestration/state/.\*.lock' .gitignore"
+unset FAKE_PG_LOG FAKE_PG_WS
 # 공개 벤치마크 → 품질: Terminal-Bench 페이지(이스케이프된 리더보드 JSON)에서 카탈로그에 맞는 줄만, 다른 CLI 점수는 빌리지 않는다
 python3 - "$W/tb.html" <<'PY'
 import json, sys

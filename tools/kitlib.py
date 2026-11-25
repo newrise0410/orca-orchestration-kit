@@ -27,6 +27,31 @@ def workspace_path(v):
     return v.split("::", 1)[1] if "::" in v else v
 
 
+class locked:
+    """orchestration/state/.<name>.lock 파일 잠금(여러 세션이 dispatch.tsv·tasks.yaml을 동시에 고칠 때). fcntl이 없으면(Windows) 그냥 지나간다."""
+
+    def __init__(self, repo, name="state"):
+        self.path = Path(repo) / "orchestration" / "state" / f".{name}.lock"
+        self.f = None
+
+    def __enter__(self):
+        try:
+            import fcntl
+        except ImportError:
+            return self
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.f = open(self.path, "a")
+        fcntl.flock(self.f, fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, *exc):
+        if self.f:
+            import fcntl
+            fcntl.flock(self.f, fcntl.LOCK_UN)
+            self.f.close()
+        return False
+
+
 def msg_payload(m):
     """Orca 메일의 payload → dict. --full로 읽으면 JSON 문자열로 온다(현장 확인)."""
     pl = (m or {}).get("payload")

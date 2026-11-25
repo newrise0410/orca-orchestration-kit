@@ -27,6 +27,7 @@ routing:
   prefer: {}                   # 태그별 선호 카탈로그 키 (+2점. 예: {frontend: agy-gemini-neon})
   pin: {}                      # 고정 (예: {review: codex-sol, L1: claude-opus}). 쓸 수 없으면 무시
   auto_update: daily           # 구독 CLI 자체 업데이트(claude·codex·agy·grok update): daily | weekly | off. launch.sh가 워커를 띄우기 전 한 번, 뒤이어 모델 목록을 다시 읽는다
+                               # 재현성이 중요한 구간(관문·측정)에서는 off. 앞뒤 판은 state/cli_update.json에 남는다
   quota:                       # 잔여 한도(Orca가 모으는 구독별 사용률, orca account list). 확인: models.py quota
     enabled: true
     hard_percent: 98           # 창(5시간 세션·주간·모델별) 하나라도 이 이상이면 초기화까지 제외. 모두 소진이면 launch.sh가 보류

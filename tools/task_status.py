@@ -55,7 +55,8 @@ def main(argv=None):
     a = ap.parse_args(argv)
     repo = kitlib.repo_root(a.repo)
     p = kitlib.tasks_path(repo, kitlib.load_config(repo, a.config), a.tasks)
-    p.write_text(set_status(p.read_text(encoding="utf-8"), a.id, a.status), encoding="utf-8")
+    with kitlib.locked(repo):
+        p.write_text(set_status(p.read_text(encoding="utf-8"), a.id, a.status), encoding="utf-8")
     print(f"{a.id}: status {a.status}")
     return 0
 

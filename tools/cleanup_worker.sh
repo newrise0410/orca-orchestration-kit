@@ -23,7 +23,12 @@ head=$(git -C "$d" rev-parse HEAD)
 [ "$head" = "$(git rev-parse -q --verify "$P$rb" || true)" ] || { echo "보류 $n: $P$rb와 HEAD가 다르다(미푸시)"; exit 1; }
 git merge-base --is-ancestor "$head" "$P$up" || { echo "보류 $n: $P$up에 머지되지 않았다"; exit 1; }
 [ -z "$(git -C "$d" status --porcelain)" ] || { echo "보류 $n: 작업 트리에 변경이 있다"; exit 1; }
-wl=$("$ORCA" orchestration worker-list ${RUN:+--run "$RUN"} --limit 100 --json)
+# 워커가 100개를 넘는 Run도 있으므로 페이지를 넘겨 전부 읽는다(status.all_workers)
+wl=$(python3 -c "
+import json,sys; sys.path.insert(0,'$T'); import status
+ws,err=status.all_workers(sys.argv[1])
+if err: sys.stderr.write('worker-list 실패: '+err+chr(10)); sys.exit(1)
+print(json.dumps({'result':{'workers':ws}}))" "$RUN")
 act=$(printf '%s' "$wl" | python3 -c "
 import json,sys
 ws=json.load(sys.stdin).get('result',{}).get('workers',[])
