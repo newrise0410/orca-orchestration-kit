@@ -8,8 +8,10 @@
 정지 점검 판정 (한 줄씩, 이상이 없으면 '정상'):
   한도 정지   워커가 도는 구독(그 모델의 창)이 사용량 한도 100% → quota_switch.py (자동 전환, 곧 풀리면 대기)
   한도 풀림   대기로 둔 워커의 한도가 풀렸다 → quota_switch.py가 '이어서 하라'를 보낸다
-  필터 중단   워커의 마지막 응답이 안전 필터·이용 정책 차단으로 끊겼다(살아 있어 보여도 일하지 않는다)
+  필터 중단   워커가 안전 필터·이용 정책 차단으로 끊겼다(살아 있어 보여도 일하지 않는다). 응답 블록·터미널 화면 끝·
+              Orca escalation 메일(stopReason=errored)의 Last output에서 찾는다
               → quota_switch.py (진행분 보존 → 다른 구독으로 이어받기, 그 모델은 이 작업 후보에서 뺀다)
+  오류 중단   errored escalation인데 한도도 차단 문구도 아님 → 메일의 Last output·worker-read로 직접 확인
   attention   Orca가 워커에 주의 표시(입력 대기 프롬프트 등) → worker-show / worker-read로 원인 확인
   커밋 없음    진행 중인데 마지막 커밋과 이 투입의 시작 중 늦은 쪽이 stale-min보다 오래됨 → worker-read로 화면 끝 확인
               (보완 워커가 앞 차수와 같은 브랜치를 쓰면 앞 차수 커밋이 마지막 커밋이라, 투입 시각이 더 늦으면 그것을 기준으로 잰다)
@@ -115,6 +117,8 @@ def collect(repo, cfg, a):
         msgs = (mb.get("result") or {}).get("messages") or []
         o["mail"][label] = {"run": rid, "error": None if mb.get("ok", False) else (mb.get("error") or {}).get("message"),
                             "unhandled": [m for m in msgs if m.get("handled") is False]}
+        if rid == kitlib.cfg_get(cfg, "orca.work_run", ""):
+            o["escalations"] = [m for m in msgs if m.get("type") == "escalation"]
     wr = kitlib.cfg_get(cfg, "orca.work_run", "")
     if wr:
         ws, err = all_workers(wr)
@@ -122,8 +126,13 @@ def collect(repo, cfg, a):
         tl = orca_json(["orchestration", "task-list", "--run", wr])
         titles = {t.get("id"): t.get("title") for t in (tl.get("result") or {}).get("tasks") or []}
         idset = set(tasks)
+        o["by_dispatch"] = {}
         for w in ws:
             state = str(w.get("state"))
+            t_ = titles.get(w.get("taskId")) or ""
+            o["by_dispatch"][w.get("dispatchId")] = {"dispatch": w.get("dispatchId"), "title": t_, "kit_id": kit_id_of(t_, idset),
+                                                     "state": state, "liveness": w.get("liveness"),
+                                                     "workspace": kitlib.workspace_path(w.get("workspace"))}
             if state in kitlib.SETTLED_WORKER_STATES:
                 o["settled"][state] = o["settled"].get(state, 0) + 1
                 continue
@@ -147,9 +156,8 @@ def collect(repo, cfg, a):
             if r.get("agent"):
                 by[r["agent"]] = by.get(r["agent"], 0) + 1
         out["quota_stalls"] = quota_stalls(repo, catalog, pol, o["workers"])
-        qd = {q["dispatch"] for q in out["quota_stalls"]}
-        out["turn_stops"] = [] if getattr(a, "no_read", False) else [
-            dict(w, **ts) for w in o["workers"] if w["dispatch"] not in qd for ts in [turn_stop(w["dispatch"])] if ts]
+        out["turn_stops"], out["error_stops"] = ([], []) if getattr(a, "no_read", False) else \
+            turn_stops(repo, o, rows, {q["dispatch"] for q in out["quota_stalls"]})
         try:
             out["quota_waits"] = json.loads((routing.state_dir(repo) / "quota_wait.json").read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -161,8 +169,8 @@ def collect(repo, cfg, a):
     return out
 
 
-# 안전 필터·이용 정책 차단 문구(CLI마다 다르다). 워커의 마지막 응답(assistant 글·오류 블록)에서만 찾는다.
-# 도구 결과(읽은 파일·시험 출력)는 보지 않는다: 검토 대상 문서에 이 말이 있어도 오탐하지 않게.
+# 안전 필터·이용 정책 차단 문구(CLI마다 다르다).
+# transcript(응답 블록): 마지막 assistant 응답 두 개의 글·오류 블록에서 부분 일치. 도구 결과(읽은 파일·시험 출력)는 보지 않는다.
 FILTER_PATTERNS = [
     r"usage polic(?:y|ies)",
     r"content (?:polic(?:y|ies)|filter(?:ing)?)",
@@ -172,12 +180,46 @@ FILTER_PATTERNS = [
     r"finish_?reason\W{0,4}(?:safety|content_filter|recitation|prohibited_content)",
     r"(?:cyber ?security|safety) polic(?:y|ies)",
     r"invalid_prompt",
+    r"this content can['’]t be shown",
+    r"extra care with some [\w-]+ requests",
 ]
 FILTER_RX = re.compile("|".join(FILTER_PATTERNS), re.I)
+# 화면(터미널 끝 · escalation 메일의 Last output): 검토 대상 문서 글이 섞이므로 안내 블록의 고정 줄과 **줄 전체가** 맞을 때만.
+# codex는 이 안내를 응답 블록으로 남기지 않고 화면에만 찍는다(현장 확인).
+SCREEN_LINES = [
+    r"This content can['’]t be shown\.?",                         # codex 안전 필터 안내 첫 줄
+    r"We take extra care with some [\w-]+ requests\b.*",           # 그다음 줄
+    r"API Error:.*\bUsage Policy\b.*",                             # Claude Code 이용 정책 차단
+]
+SCREEN_RX = [re.compile(x, re.I) for x in SCREEN_LINES]
 
 
-def turn_stop(did, tail=2):
-    """워커 마지막 응답의 중단 사유 → {'kind': 'filter', 'evidence': 줄} | None. 읽을 수 없으면 None."""
+def screen_match(text):
+    """화면 글에서 차단 안내 줄 → 그 줄 | None. 줄 앞의 아이콘·글머리(ⓘ • * - >)와 공백은 떼고 줄 전체로 맞춘다."""
+    for ln in str(text or "").splitlines():
+        t = re.sub(r"^[\sⓘℹ•*>\-│|]+", "", ln).strip()
+        if t and any(rx.fullmatch(t) for rx in SCREEN_RX):
+            return " ".join(t.split())[:160]
+    return None
+
+
+def _strings(o):
+    """worker-read --source terminal 결과에서 글을 모두 모은다(꼴이 정해져 있지 않다). 메타데이터 칸만 뺀다 —
+    판정은 고정 안내 줄과 줄 전체가 맞아야 하므로 글을 넉넉히 모아도 오탐하지 않는다."""
+    skip = {"cursor", "dispatchId", "taskId", "runId", "source", "provider", "status", "sourceIdentity", "fallbackReason",
+            "id", "warnings", "clipping", "projection", "model", "host"}
+    if isinstance(o, str):
+        return [o]
+    if isinstance(o, list):
+        return [x for v in o for x in _strings(v)]
+    if isinstance(o, dict):
+        return [x for k, v in o.items() if k not in skip for x in _strings(v)]
+    return []
+
+
+def turn_stop(did, tail=2, screen=True):
+    """워커 중단 사유 → {'kind': 'filter', 'evidence', 'source'} | None.
+    transcript의 마지막 응답 → (없으면) 터미널 화면 끝. 끝난 워커는 화면이 해제돼 읽을 수 없다(메일 쪽은 turn_stops가 본다)."""
     d = orca_json(["orchestration", "worker-read", "--dispatch", did, "--limit", "8"])
     msgs = (((d.get("result") or {}).get("transcript") or {}).get("messages") or []) if d.get("ok") else []
     texts = []
@@ -190,8 +232,66 @@ def turn_stop(did, tail=2):
     for t in texts:
         for ln in t.splitlines():
             if FILTER_RX.search(ln):
-                return {"kind": "filter", "evidence": " ".join(ln.split())[:160]}
+                return {"kind": "filter", "evidence": " ".join(ln.split())[:160], "source": "응답"}
+    if screen:
+        d = orca_json(["orchestration", "worker-read", "--dispatch", did, "--source", "terminal", "--limit", "80"])
+        if d.get("ok"):
+            r = d.get("result") or {}
+            tail = (r.get("terminal") or {}).get("tail") if isinstance(r.get("terminal"), dict) else None   # 실제 꼴: terminal.tail = 화면 줄 목록
+            ev = screen_match("\n".join(map(str, tail)) if isinstance(tail, list) else "\n".join(_strings(r)))
+            if ev:
+                return {"kind": "filter", "evidence": ev, "source": "화면"}
     return None
+
+
+def last_output(body):
+    """escalation 메일 본문의 'Last output:' 칸(Orca가 붙이는 화면 끝 캡처)."""
+    m = re.search(r"Last output:\s*(.*)", str(body or ""), re.S | re.I)
+    return m.group(1) if m else ""
+
+
+def errored(m):
+    pl = m.get("payload") or {}
+    return str(pl.get("stopReason") or "").lower() == "errored" or bool(re.search(r"stopReason\W{0,3}errored|stopped on an error", str(m.get("body") or ""), re.I))
+
+
+def turn_stops(repo, o, rows, skip):
+    """(필터 중단[], 오류 중단[]) — 진행 중 워커의 응답·화면, 그리고 errored escalation 메일의 Last output.
+    이미 넘긴 dispatch(quota_switch.tsv)와 같은 작업에 더 새 투입이 있는 옛 dispatch는 뺀다."""
+    done = routing.read_switches(repo) | set(skip)
+    latest = {}
+    for r in rows.values():
+        if r["kit_id"] and (r["kit_id"] not in latest or r["ts"] >= latest[r["kit_id"]]["ts"]):
+            latest[r["kit_id"]] = r
+    def info(did):
+        w = dict((o.get("by_dispatch") or {}).get(did) or {"dispatch": did})
+        r = rows.get(did) or {}
+        w.update(agent=r.get("agent", ""), key=r.get("key", ""), mode=r.get("mode", "") or "new", model_id=r.get("model", ""),
+                 model=r.get("key") or r.get("model") or "")
+        w.setdefault("kit_id", r.get("kit_id")); w.setdefault("title", r.get("title"))
+        return w
+    def stale(did):
+        r = rows.get(did)
+        return bool(r and r["kit_id"] and latest.get(r["kit_id"], r)["did"] != did)
+    found, errs = {}, {}
+    live = {w["dispatch"] for w in o.get("workers") or []}
+    for m in o.get("escalations") or []:
+        did = (m.get("payload") or {}).get("dispatchId")
+        if not did or did in done or did in found or stale(did) or not errored(m):
+            continue
+        ev = screen_match(last_output(m.get("body")))
+        if ev:
+            found[did] = dict(info(did), kind="filter", evidence=ev, source="메일 Last output", message=m.get("id"))
+        else:
+            errs[did] = dict(info(did), message=m.get("id"), handled=m.get("handled"))
+    for did in live:
+        if did in done or did in found:
+            continue
+        ts = turn_stop(did, screen=True)
+        if ts:
+            found[did] = dict(info(did), **ts)
+            errs.pop(did, None)
+    return list(found.values()), [e for d, e in errs.items() if d not in found]
 
 
 def started_ts(ts):
@@ -233,12 +333,18 @@ def stall_lines(s, stale_min):
     lines = []
     now = time.time()
     qs = {q["dispatch"]: q for q in s.get("quota_stalls") or []}
+    tsd = {x["dispatch"]: x for x in s.get("turn_stops") or []}
+    for x in tsd.values():
+        who_ = f"{x.get('kit_id') or x.get('title') or '?'} ({x['dispatch']})"
+        lines.append(f"필터 중단 {who_}: \"{x['evidence']}\" ({x.get('source', '?')}) · {x.get('model') or x.get('agent') or '?'} → "
+                     "python3 orchestration/tools/quota_switch.py (다른 구독으로 이어받기, 이 모델은 이 작업 후보에서 뺀다)")
+    for x in s.get("error_stops") or []:
+        lines.append(f"오류 중단 {x.get('kit_id') or x.get('title') or '?'} ({x['dispatch']}): Orca escalation stopReason=errored, "
+                     f"차단 문구는 못 찾음 → 메일 {x.get('message')}의 Last output·worker-read로 확인(한도면 '한도 정지', 필터면 문구를 키트에 알린다)")
     for w in o["workers"]:
         who = f"{w['kit_id'] or w['title'] or '?'} ({w['dispatch']})"
-        ts_ = {x["dispatch"]: x for x in s.get("turn_stops") or []}.get(w["dispatch"])
-        if ts_:
-            lines.append(f"필터 중단 {who}: \"{ts_['evidence']}\" · {w.get('model') or w.get('agent') or '?'} → "
-                         "python3 orchestration/tools/quota_switch.py (다른 구독으로 이어받기, 이 모델은 이 작업 후보에서 뺀다)")
+        if w["dispatch"] in tsd:
+            continue   # 아래에서 한 번에
         elif w["dispatch"] in qs:
             q = qs[w["dispatch"]]
             win = ", ".join(f"{lab} {u:.0f}%" + (f"({routing._hm(r)} 초기화)" if r else "") for lab, u, r in q["windows"])
