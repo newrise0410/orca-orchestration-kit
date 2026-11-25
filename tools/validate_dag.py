@@ -93,6 +93,10 @@ def scope_overlap(a, b):
     return False
 
 
+OPEN_PROMISE = re.compile(r"언제나|언제 \S*도|항상|어떤 경우에도|모든 경우|모든 입력|완전히|절대|무엇이든|빠짐없이|"
+                          r"\balways\b|\bany (?:input|case|time)\b|\ball (?:cases|inputs)\b|\bnever\b|\bguarantee[sd]? (?:that )?no\b", re.I)
+
+
 def validate(text, cfg, archived=()):
     errors, warnings = [], []
     archived = [t for t in archived if isinstance(t, dict) and t.get("id")]
@@ -164,6 +168,12 @@ def validate(text, cfg, archived=()):
             warnings.append(f"{tid}: objective {t['objective']!r}는 quality/balanced/economy/speed")
         if t.get("route") and (t.get("agent") or t.get("model")):
             warnings.append(f"{tid}: route와 agent/model을 같이 주면 agent/model이 이긴다")
+        # 보장하는 것 / 범위 밖(닫힌 목록, 교훈 L-22): 끝없이 반례가 나오는 열린 약속을 요구로 걸지 않는다
+        if layer in ("L1", "L2") and st in ("todo", "ready") and not kitlib.is_gate(t, cfg) and not kitlib.as_list(t.get("guarantees")):
+            warnings.append(f"{tid}: guarantees(보장하는 것) 없음 — 투입 전에 닫힌 목록으로 적고 out_of_scope도 적는다")
+        for g in kitlib.as_list(t.get("guarantees")):
+            if OPEN_PROMISE.search(str(g)):
+                warnings.append(f"{tid}: 열린 약속 '{str(g)[:50]}' — 검토자가 찾을 때마다 반례가 나온다. 조건(입력·경로·횟수)을 닫아 적는다")
         if layer == "L2" and t.get("base") and not str(t["base"]).startswith(int_prefix):
             warnings.append(f"{tid}: L2인데 base가 통합 브랜치({int_prefix}*)가 아님: {t['base']}")
     cycles = find_cycles(ids, {k: [d for d in v if d in idset] for k, v in deps.items()})

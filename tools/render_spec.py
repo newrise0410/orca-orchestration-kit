@@ -168,6 +168,47 @@ def retry_section(t, notes_text, cfg):
             f"### 지적\n{notes_text.rstrip()}\n")
 
 
+def promise_section(t, review=False):
+    """보장하는 것 / 범위 밖(tasks.yaml guarantees·out_of_scope). 검토는 이 목록 안에서만 차단한다."""
+    g, o = kitlib.as_list(t.get("guarantees")), kitlib.as_list(t.get("out_of_scope"))
+    if not g and not o:
+        return ""
+    head = ("## 보장하는 것 / 범위 밖 (닫힌 목록)\n"
+            + ("머지를 막는 H는 **아래 '보장하는 것' 항목을 깨는 실행 반례**만이다. '범위 밖'이나 목록에 없는 약속의 반례는 "
+               "'범위 밖'으로 적고 차단 사유로 삼지 않는다(정보로 남긴다).\n" if review else
+               "이 작업이 지키는 약속은 아래 '보장하는 것'이 전부다. 항목마다 그것을 확인하는 시험을 두고, `worker_done`에 '항목 → 시험 이름'을 적는다. "
+               "'범위 밖'은 하지 않는다(필요해 보이면 `ask`).\n"))
+    return (head + ("\n### 보장하는 것\n" + "\n".join(f"- {x}" for x in g) + "\n" if g else "")
+            + ("\n### 범위 밖\n" + "\n".join(f"- {x}" for x in o) + "\n" if o else ""))
+
+
+def checklist_items(repo, cfg):
+    """프로젝트 핵심 약속 점검표(orchestration/checklist.md)의 '## 항목' 절 줄(- 로 시작, '- [예]' 제외)."""
+    p = repo / kitlib.cfg_get(cfg, "paths.checklist", "orchestration/checklist.md")
+    try:
+        lines = p.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    out, on = [], False
+    for ln in lines:
+        t = ln.strip()
+        if t.startswith("#"):
+            on = t.lstrip("#").strip() == "항목"
+        elif on and t.startswith("- ") and not t.startswith("- [예]"):
+            out.append(t[2:].strip())
+    return out
+
+
+def checklist_section(items, review=False):
+    if not items:
+        return ""
+    head = ("## 핵심 약속 점검표 (먼저 본다)\n워커의 '항목 → 시험 이름' 목록부터 확인한다. 시험이 없거나 시험이 항목을 실제로 확인하지 않으면 그것이 첫 지적이다.\n"
+            if review else
+            "## 핵심 약속 점검표 (완료 보고 전에 스스로 확인)\n지난 검토들이 되풀이해 잡은 항목이다. 이 작업에 해당하는 항목마다 확인하는 시험을 두고, "
+            "`worker_done`과 증적 보고서에 '항목 → 시험 이름(또는 해당 없음과 이유)'을 적는다.\n")
+    return head + "\n".join(f"- {x}" for x in items) + "\n"
+
+
 def handoff_section(t, notes_text, cfg, review=False):
     """한도 전환 이어받기: 앞 워커가 구독 한도로 멈춘 같은 워크트리에서 이어서 끝낸다(quota_switch.py가 부른다)."""
     b = t.get("branch", "")
@@ -245,6 +286,9 @@ def main(argv=None):
             elif a.handoff:
                 text = insert_before_end(text, handoff_section(t, Path(a.handoff).read_text(encoding="utf-8"), cfg))
                 stem = f"{i}.handoff-{a.suffix}"
+        for block in (promise_section(t, review=a.review), checklist_section(checklist_items(repo, cfg), review=a.review)):
+            if block:
+                text = insert_before_end(text, block)
         # 인계 사항: 원 작업의 <ID>.extra.md(검토 명세 제외) + 이 명세 전용 <stem>.extra.md
         extras = ([] if a.review else [f"{i}.extra.md"]) + ([f"{stem}.extra.md"] if stem != i else [])
         for name in extras:

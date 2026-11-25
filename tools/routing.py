@@ -463,7 +463,8 @@ def read_feedback(repo):
             c = ln.split("\t")
             if len(c) >= 3 and not ln.startswith("#"):
                 try:
-                    out.append({"ts": c[0], "kit_id": c[1], "score": float(c[2]), "note": c[3] if len(c) > 3 else ""})
+                    out.append({"ts": c[0], "kit_id": c[1], "score": float(c[2]), "note": c[3] if len(c) > 3 else "",
+                                "category": c[4].strip() if len(c) > 4 else ""})
                 except ValueError:
                     pass
     return out
@@ -1091,6 +1092,9 @@ def score(key, m, c, pol, ctx):
     if key in ctx["failed"]:
         s -= 2.5
         why.append("이 작업에서 실패한 모델")
+    if key in (ctx.get("avoid_keys") or []):
+        s -= 3
+        why.append("구현한 모델과 같음")
     if m.get("agent") in (ctx.get("avoid_agents") or []):
         s -= 3
         why.append(f"교차 검토(구현 {m.get('agent')})")
@@ -1120,7 +1124,9 @@ def route(repo, cfg, tid, tasks, mode="new", live_dids=None, refresh=False, cata
            "usage": orca_usage(1) if rcfg(pol, "daily_soft_tokens") else {},
            "failed": fails if mode in ("new", "handoff") else set(),
            # 교차 검토: 이 작업의 코드를 쓴 구독 전부(한도로 이어받았으면 앞뒤 구독 모두)
-           "avoid_agents": sorted({r["agent"] for r in impl}) if mode == "review" and rcfg(pol, "cross_review", True) else []}
+           "avoid_agents": sorted({r["agent"] for r in impl}) if mode == "review" and rcfg(pol, "cross_review", True) else [],
+           # 같은 모델이 자기 구현을 검토하는 것은 가장 나쁘다: 구독 회피와 별도로 더 깎는다
+           "avoid_keys": sorted({key_of_row(r, catalog["models"]) for r in impl} - {None}) if mode == "review" else []}
     for ag, n in (extra_running or {}).items():
         ctx["running"][ag] = ctx["running"].get(ag, 0) + n
     cools = read_cooldowns(repo)
@@ -1130,7 +1136,8 @@ def route(repo, cfg, tid, tasks, mode="new", live_dids=None, refresh=False, cata
     minq = (rcfg(pol, "min_quality") or {}).get(str(t.get("layer")))
     pin = (rcfg(pol, "pin") or {}).get(mode) or (rcfg(pol, "pin") or {}).get(str(t.get("layer")))
     cands, excluded, quota_out = [], {}, set()
-    fblock = read_filter_blocks(repo).get(tid, set()) | set(exclude_keys or ())
+    fblock = read_filter_blocks(repo).get(tid, set())
+    xkeys = set(exclude_keys or ()) - fblock
     for key, m in catalog["models"].items():
         ok, why = availability(key, m, pol, disc)
         if not ok:
@@ -1149,6 +1156,9 @@ def route(repo, cfg, tid, tasks, mode="new", live_dids=None, refresh=False, cata
             continue
         if key in fblock:
             excluded[key] = "이 작업에서 안전 필터로 끊긴 모델"
+            continue
+        if key in xkeys:
+            excluded[key] = "검토 독립성·필터: 이번 결정에서 뺀 모델"
             continue
         qx, qadj, qwhy = quota_effect(m, catalog["agents"], quota, pol)
         if not qx and need_minutes is not None:

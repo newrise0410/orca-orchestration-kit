@@ -51,6 +51,7 @@ review:
   agent: ""
   model: ""
   effort: ""
+  scope_escalate_after: 2      # 같은 작업에서 같은 차단 계열(models.py feedback --category)이 이만큼 연속이면 정지 점검이 '범위 결정 필요'
 
 # 워크트리 사이 동시 실행 슬롯 (orchestration/tools/slot.sh <이름> -- <명령>)
 slots:

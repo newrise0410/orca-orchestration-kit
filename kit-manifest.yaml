@@ -6,7 +6,7 @@
 #   module: core(항상) / run(실행 격리) / ros2(ROS 2 프로필) / review(검토 단계)
 #   render: true면 {{...}}를 채운다. keep: 설치 때 남겨 둘 자리표시자(부트스트랩에서 채움)
 #   mode:  실행 권한 등 (기본 644)
-version: 0.8.5
+version: 0.9.0
 
 files:
   # ── 공통 규칙
@@ -25,6 +25,7 @@ files:
   - {src: templates/orchestration/README.md, dst: orchestration/README.md, kind: managed, module: core, render: true}
   - {src: templates/orchestration/kit.yaml, dst: orchestration/kit.yaml, kind: seed, module: core, render: true}
   - {src: templates/orchestration/models.yaml, dst: orchestration/models.yaml, kind: seed, module: core, render: true}
+  - {src: templates/orchestration/checklist.md, dst: orchestration/checklist.md, kind: seed, module: core}
   - {src: templates/orchestration/templates/evidence.md, dst: orchestration/templates/evidence.md, kind: managed, module: core}
   - {src: templates/orchestration/templates/blocks/_always.md, dst: orchestration/templates/blocks/_always.md, kind: managed, module: core, render: true}
   - {src: templates/orchestration/templates/blocks/remote.md, dst: orchestration/templates/blocks/remote.md, kind: managed, module: run}

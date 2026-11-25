@@ -583,6 +583,57 @@ rm -f orchestration/state/quota_cache.json; unset FAKE_SW_DIR FAKE_SW_WT
 git branch req/X-CL int/api && git worktree add -q "$W/x-cl" req/X-CL && git branch wip/X-CL-quota-20260101-000000 req/X-CL
 o=$(ORCA_CLI_COMMAND="$W/fake-orca-sw" FAKE_SW_DIR="$W/sw" FAKE_SW_WT="$W/wt-x-sw" $T/cleanup_worker.sh --dry-run x-cl req/X-CL int/api 2>&1)
 check "cleanup: 머지된 작업의 한도 전환 보존 브랜치도 지운다" has "$o" "git branch -D wip/X-CL-quota-20260101-000000"
+# 범위 관리(교훈 L-22): 보장하는 것/범위 밖 닫힌 목록 · 핵심 약속 점검표 · 같은 계열 차단 2회면 범위 결정 · 검토 대체(같은 구독 다른 모델)
+cat >> orchestration/tasks.yaml <<'YAML'
+- id: X-GU
+  title: 가림 처리
+  layer: L2
+  module: api
+  branch: req/X-GU
+  base: int/api
+  deps: []
+  write_scope: [api/mask/]
+  acceptance: "로그의 주민번호 꼴을 가린다"
+  guarantees: ["로그·응답 본문 두 곳에서 주민번호 꼴(6-7자리) 문자열을 *로 가린다", "언제나 원문이 새지 않는다"]
+  out_of_scope: ["첨부 파일 속 원문", "외부 시스템 로그"]
+  status: todo
+- id: X-NG
+  title: 보장 목록 없는 작업
+  layer: L2
+  module: api
+  branch: req/X-NG
+  base: int/api
+  deps: []
+  write_scope: [api/ng/]
+  acceptance: "무언가 한다"
+  status: todo
+YAML
+o=$(python3 $T/validate_dag.py 2>&1)
+check "DAG 검증: guarantees 없음 경고 · 열린 약속('언제나') 경고" bash -c 'grep -q "X-NG: guarantees(보장하는 것) 없음" <<<"$0" && grep -q "X-GU: 열린 약속 .언제나 원문이 새지 않는다" <<<"$0" && ! grep -q "X-GU: guarantees" <<<"$0"' "$o"
+printf '# 점검표\n설명 줄\n- 이 줄은 항목 절 밖이라 안 붙는다\n\n## 항목\n- [예] 예시는 안 붙는다\n- 영역 분리: 다른 영역 응답·로그에 안 나온다(교차 조회 시험)\n- CLI 차단: 비대화 실행에서 확인 창을 안 기다린다\n' > orchestration/checklist.md
+python3 $T/render_spec.py X-GU >/dev/null; python3 $T/render_spec.py --review X-GU >/dev/null
+check "명세: 보장/범위 밖 절과 점검표(항목 절만, 예시 제외)" bash -c 'f=orchestration/specs/X-GU.md; grep -q "## 보장하는 것 / 범위 밖 (닫힌 목록)" $f && grep -q "주민번호 꼴(6-7자리)" $f && grep -q "### 범위 밖" $f && grep -q "## 핵심 약속 점검표 (완료 보고 전에 스스로 확인)" $f && grep -q "영역 분리: 다른 영역" $f && ! grep -q "예시는 안 붙는다\|항목 절 밖" $f && grep -n "## 보장하는 것" $f | cut -d: -f1 | xargs -I{} test {} -lt $(grep -n "^## 종료" $f | cut -d: -f1)'
+check "검토 명세: 보장 목록 안의 반례만 차단 · 점검표를 먼저 본다" bash -c 'f=orchestration/specs/X-GU.review.md; grep -q "머지를 막는 H는 \*\*아래 .보장하는 것. 항목을 깨는 실행 반례\*\*만" $f && grep -q "## 핵심 약속 점검표 (먼저 본다)" $f'
+$M feedback X-GU major --category 영역분리 --note 'a' >/dev/null; $M feedback X-GU fail --category 영역분리 --note 'b' >/dev/null
+o=$(python3 $T/status.py --stall --no-orca 2>&1)
+check "같은 계열 차단 2회 연속 → 범위 결정 필요" has "$o" "범위 결정 필요 X-GU: '영역분리' 차단 2회 연속"
+$M feedback X-GU major --category 승인무결성 >/dev/null
+o=$(python3 $T/status.py --stall --no-orca 2>&1)
+check "계열이 달라도 차단 3회 연속 → 검토 반복" bash -c 'grep -q "검토 반복 X-GU: 차단 3회 연속(계열 승인무결성, 영역분리)" <<<"$0" && ! grep -q "범위 결정 필요 X-GU" <<<"$0"' "$o"
+$M feedback X-GU pass >/dev/null
+o=$(python3 $T/status.py --stall --no-orca 2>&1)
+check "통과 판정이 오면 연속이 끊긴다" bash -c '! grep -q "X-GU" <<<"$0"' "$o"
+check "검토: 구현한 모델은 같은 구독 감점과 별도로 더 깎는다 · cross_review: model이면 구현 모델만 뺀다" python3 -c "
+import sys; sys.path.insert(0,'$T'); import routing, kitlib
+cat,pol=routing.load('.'); cat=routing.apply_bench(cat); m=cat['models']['claude-sonnet']
+c={'difficulty':3.0,'tags':['review'],'critical':False}
+base={'objective':'balanced','learned':{},'running':{},'usage':{},'failed':set(),'avoid_agents':['claude'],'avoid_keys':[]}
+s1,_=routing.score('claude-sonnet',m,c,pol,base); s2,w=routing.score('claude-sonnet',m,c,pol,dict(base,avoid_keys=['claude-sonnet']))
+assert s2==s1-3 and '구현한 모델과 같음' in w, (s1,s2,w)
+cfg=kitlib.load_config('.'); _,t=kitlib.all_tasks('.',cfg)
+d=routing.route('.',cfg,'X-GU',t,'review',quota={},exclude_keys={'codex-sol'})
+assert d['excluded'].get('codex-sol','').startswith('검토 독립성'), d['excluded']"
+rm -f orchestration/checklist.md
 # 공개 벤치마크 → 품질: Terminal-Bench 페이지(이스케이프된 리더보드 JSON)에서 카탈로그에 맞는 줄만, 다른 CLI 점수는 빌리지 않는다
 python3 - "$W/tb.html" <<'PY'
 import json, sys

@@ -14,6 +14,7 @@ docs/07_process/snapshots/.gitkeep
 docs/README.md
 .gitignore
 .orca-kit/installed.json
+orchestration/checklist.md
 orchestration/kit.yaml
 orchestration/models.yaml
 orchestration/README.md
@@ -51,6 +52,8 @@ orchestration/tools/launch.py
 orchestration/tools/launch.sh
 orchestration/tools/model_catalog.yaml
 orchestration/tools/models.py
+orchestration/tools/quota_switch.py
+orchestration/tools/quota_watch.py
 orchestration/tools/render_spec.py
 orchestration/tools/routing.py
 orchestration/tools/slot.sh
