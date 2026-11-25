@@ -1272,8 +1272,15 @@ def collect_models(repo, tasks):
     caps = routing.rcfg(pol, "max_concurrent") or {}
     allow = routing.rcfg(pol, "agents")
     usage = routing.orca_usage(1)
+    quota = routing.read_quota(repo, net=False) if routing.quota_cfg(pol)["enabled"] else {}   # 캐시만(Orca에 묻지 않는다)
+    hard = float(routing.quota_cfg(pol)["hard_percent"])
+    now = time.time()
     for ag in (list(allow) if allow is not None else list(catalog["agents"])):
         info = (disc or {}).get(ag) or {}
+        qi = quota.get((catalog["agents"].get(ag) or {}).get("quota") or ag) or {}
+        qw = {k: w for k, w in (qi.get("windows") or {}).items() if k in ("session", "weekly") and (not w["resets"] or w["resets"] > now)}
+        qtxt = " · ".join(f"{'세션' if k == 'session' else '주'} {w['used']:.0f}%" for k, w in sorted(qw.items()))
+        qfull = [w for w in qw.values() if w["used"] >= hard]
         if disc is None:
             state, note = "unknown", "모델 확인 전 (models.py discover)"
         elif not info.get("bin"):
@@ -1286,11 +1293,14 @@ def collect_models(repo, tasks):
             note = f"쿨다운 {left // 3600}h" if left >= 3600 else f"쿨다운 {left // 60}분"
             if cools[ag].get("reason"):
                 note += f" · {cools[ag]['reason']}"
+        elif qfull:
+            state = "cool"
+            note = f"한도 소진 · {routing._hm(min(w['resets'] for w in qfull))} 초기화" if all(w["resets"] for w in qfull) else "한도 소진"
         else:
             state, note = "ok", ""
         res["agents"].append({"id": ag, "label": AGENT_LABEL.get(ag, ag), "state": state, "note": note,
                               "running": running.get(ag, 0), "cap": caps.get(ag),
-                              "tokens": routing.today_tokens(usage, ag)})
+                              "tokens": routing.today_tokens(usage, ag), "quota": qtxt})
     res["enabled"] = routing.enabled(pol)
     res["objective"] = str(routing.rcfg(pol, "objective", "balanced"))
     if res["enabled"] and disc is not None:
@@ -1521,7 +1531,8 @@ def build(args):
         for g in models["agents"]:
             if g["state"] == "ok":
                 cap = g["cap"] if g["cap"] is not None else "∞"
-                tok = f' <span class="muted small">오늘 {fmt_tokens(g["tokens"])}</span>' if g["tokens"] else ""
+                tok = f' <span class="muted small">{esc(g["quota"])}</span>' if g.get("quota") else (
+                    f' <span class="muted small">오늘 {fmt_tokens(g["tokens"])}</span>' if g["tokens"] else "")
                 body = f'{esc(g["label"])} <b>{g["running"]}/{cap}</b>{tok}'
             else:
                 body = f'{esc(g["label"])} <span class="small">{esc(trunc(g["note"], 28))}</span>'

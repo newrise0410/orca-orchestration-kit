@@ -2,9 +2,10 @@
 #
 # launch.sh는 작업에 agent/model이 없으면 여기 정책으로 (에이전트, 모델, effort)를 고른다.
 #   1) 작업 분류: 계층·쓰기 범위·완료 조건 수·어려운 말·성능 측정·선행 수 → 난이도 1~5와 태그
-#   2) 후보 점수: 능력 부족 벌점 + 구독 소모·느림 벌점(목표별 가중) + 강점 가점 + 실적(학습) − 부하
-#   3) 제외: 설치 안 된 CLI, 모델 목록에 없는 모델, 쿨다운, 동시 상한, min_quality
-# 확인: python3 orchestration/tools/models.py discover | plan | route <ID> | stats
+#   2) 후보 점수: 능력 부족 벌점(품질 = 벤치마크) + 구독 소모·느림 벌점(목표별 가중) + 강점 가점 + 실적(학습) − 부하 − 잔여 한도 빠듯
+#   3) 제외: 설치 안 된 CLI, 모델 목록에 없는 모델, 쿨다운, 한도 소진, 동시 상한, min_quality
+# 확인: python3 orchestration/tools/models.py discover | update | plan | route <ID> | stats
+# 모델 판: 카탈로그 family:(예: gpt-{v}-sol)가 CLI 목록에서 가장 높은 판을 고른다. 여기 models:에서 model을 직접 정하면 그 항목은 고정된다
 # 우선순위: launch.sh --agent/--model > 작업 항목 agent/model(route: <카탈로그 키>) > kit.yaml review.* (검토) > 이 라우팅 > kit.yaml orca.agent
 # 카탈로그(모델별 점수): orchestration/tools/model_catalog.yaml (키트 소유, upgrade로 갱신)
 
@@ -23,8 +24,16 @@ routing:
   learn: true                  # 투입 결과(dispatch.tsv × tasks.yaml × 검토 판정)로 모델 점수를 보정
   critical_dependents: 5       # 뒤에 기대는 미완료 작업이 이만큼이면 임계 경로: 능력 부족 벌점·속도 가중을 올린다
   min_quality: {}              # 계층별 최저 품질 (예: {L1: 4})
-  prefer: {}                   # 태그별 선호 카탈로그 키 (+2점. 예: {frontend: agy-gemini-flash})
+  prefer: {}                   # 태그별 선호 카탈로그 키 (+2점. 예: {frontend: agy-gemini-neon})
   pin: {}                      # 고정 (예: {review: codex-sol, L1: claude-opus}). 쓸 수 없으면 무시
+  auto_update: daily           # 구독 CLI 자체 업데이트(claude·codex·agy·grok update): daily | weekly | off. launch.sh가 워커를 띄우기 전 한 번, 뒤이어 모델 목록을 다시 읽는다
+  quota:                       # 잔여 한도(Orca가 모으는 구독별 사용률, orca account list). 확인: models.py quota
+    enabled: true
+    hard_percent: 98           # 창(5시간 세션·주간·모델별) 하나라도 이 이상이면 초기화까지 제외. 모두 소진이면 launch.sh가 보류
+    session_soft: 70           # 5시간 창이 이보다 차면 벌점(100%에서 −2)
+    pace_margin: 10            # 주간 사용률이 지난 기간 비율보다 이만큼(%p) 넘게 앞서면 벌점(최대 −2)
+    use_it_hours: 24           # 주간 창이 이 시간 안에 초기화되는데 40% 넘게 남았으면 +0.5 (안 쓰면 사라지는 한도)
+  bench: true                  # 품질을 공개 벤치마크(Terminal-Bench, tools/bench_scores.yaml)로. false면 카탈로그 추정값
   daily_soft_tokens: {}        # 하루 출력 토큰 기준(Orca 집계, 모든 프로젝트 합). 넘으면 벌점 (예: {claude: 2000000})
 
 # 에이전트 설정 덮어쓰기 (예: snap 격리 설치본이 orca CLI를 부를 수 있게 손봤다면 antigravity: {allow_confined: true})

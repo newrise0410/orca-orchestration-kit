@@ -118,7 +118,7 @@
 
 ### 6.3 판단과 한계
 - **결정적 점수 + 학습 보정을 택했다.** 투입마다 LLM으로 분류하면 느리고 비싸며 재현되지 않는다. 매니저는 분류가 틀린 작업에만 `difficulty`를 적는다. 판단이 필요한 몫은 매니저(LLM)가 tasks.yaml을 쓸 때 이미 들어간다.
-- **카탈로그 점수는 작성 시점의 추정이다**(2026-11 기준 Claude fable/opus/sonnet/haiku 별칭, Codex gpt-6-astra·gpt-6.1-sol·gpt-6.1-terra·gpt-6-luna, Antigravity gemini-3.8-flash·claude-opus-4-6, Grok grok-4.7·build-fast). `discover`가 카탈로그에 없는 새 모델을 알려 주고, 프로젝트는 `models.yaml models:`로 덮어쓴다.
+- **카탈로그 점수는 작성 시점의 추정이다**(2026-11 기준 Claude fable/opus/sonnet/haiku 별칭, Codex gpt-6-astra·gpt-6.1-sol·gpt-6.1-terra·gpt-6-luna, Antigravity gemini-4-neon·gemini-4-carbon·claude-opus-5-5, Grok grok-4.7(effort low~high, build-fast는 뺌)). `discover`가 카탈로그에 없는 새 모델을 알려 주고, 프로젝트는 `models.yaml models:`로 덮어쓴다.
 - **탐색(일부러 다른 모델에 맡겨 보기)은 하지 않는다.** 결과가 쌓이는 모델만 학습된다. 비교가 필요하면 `pin`·`prefer`로 잠시 바꾼다.
 - **구독 계정 전환은 하지 않는다.** `orca account select`는 호스트 전체 설정이라 동시 투입과 사용자 세션에 번진다. 한도는 구독 단위 쿨다운으로 다룬다. 한도 감지는 사람(매니저)이 워커 보고·화면으로 하고 `cooldown`을 건다(자동 감지는 다음 후보).
 - **Orca 사용량 파일**(`~/.config/orca/orca-{claude,codex}-usage.json`)은 Orca 내부 형식이다. 모델·날짜별 출력 토큰 합만 읽고, 형식이 바뀌면 조용히 빈 값으로 둔다. Antigravity·Grok은 집계가 없다.
@@ -135,3 +135,26 @@
 - **복사 버튼:** `file://`로 열면 클립보드 API가 막히므로 textarea 복사로 대신하고, 그것도 안 되면 명령을 대화창에 띄운다.
 - **JEV 난이도 판정(선택, 기본 꺼짐):** 규칙 분류기는 낱말 목록이라 프로젝트마다 다시 맞춰야 한다. TypeSafe JEV(글을 쓰지 않고 판정·확률만 내는 모델, 입력 100만 토큰당 수 센트)에 제목·완료 조건을 5단계 점수 질문으로 보내 뜻으로 난이도를 본다. 그러나 작업 내용이 외부로 나가고 결과가 재현되지 않으며 키가 없는 환경도 있으므로 **기본은 꺼 두고**, 켜도 `shadow`로 기록만 한 뒤 `models.py stats`의 비교(JEV가 더 어렵게 본 작업의 결과가 낮은가)를 보고 `live`로 바꾼다. 모델 선택(점수·가용성·쿨다운·실적 학습)은 그대로 규칙이 한다. JEV는 우리 실적을 배우지 못하고 구독 한도도 모르기 때문이다. 작업에 `difficulty`를 직접 줬거나 검토·재시도 투입이면 묻지 않는다. 같은 내용은 `state/jev_cache.json`에서 다시 쓰고, 대시보드는 캐시만 읽어 30초 재빌드가 외부를 부르지 않게 했다.
 - **예제:** `make_demo.sh`가 가상 라우팅 상태(모델 캐시·쿨다운·dispatch 한 줄)를 만들고 `KIT_ORCA_HOME`을 빈 폴더로 돌려, 예제 대시보드가 실행한 머신의 CLI·사용량에 따라 달라지지 않게 했다.
+
+## 8. v0.7 반영: 구독 CLI 자동 업데이트·카탈로그 계열 (2026-11-25)
+
+- **왜:** 카탈로그에 모델 ID를 하나씩 적어 두었더니 CLI에 새 판이 나와도 옛 ID를 계속 썼다(Codex gpt-6.2가 있는데 6.1-sol·6-astra). 옛 ID가 목록에서 빠지면 그 항목이 조용히 제외됐다(Antigravity claude-opus-4-6-thinking). `discover`는 ID가 목록에 있는지만 봐서 둘 다 잡지 못했다.
+- **계열(`family:`):** 판 번호 자리를 `{v}`로 적고(`gpt-{v}-sol`, `grok-{v}`), effort가 ID에 들어 있으면 `{effort}`도 적는다(`gemini-{v}-neon-{effort}`). `route()`가 discover 결과로 가장 높은 판을 고르고 model_by_effort를 다시 만든다. 판 비교는 숫자 묶음(`6.2` > `6.1` > `6`, `5-5`도 읽는다). 꼴은 앞뒤를 고정해서 `grok-4.7-build-fast` 같은 변형은 계열에 들지 않는다. 목록을 모르면(Claude 별칭·목록 실패) 카탈로그 기본 ID를 쓴다.
+- **품질 점수는 따라가지 않는다:** 같은 계열의 새 판은 같은 등급으로 본다. 새 계열(다른 이름)은 점수를 사람이 정해야 하므로 `discover`가 "카탈로그에 없는 모델"로만 알린다. 계열 옛 판은 알림에서 뺐다.
+- **프로젝트 고정:** `models.yaml models:`에서 model을 직접 정한 항목은 계열을 끈다(그 판을 쓰겠다는 뜻으로 본다).
+- **CLI 업데이트:** 네 CLI 모두 자체 업데이트 명령이 있다(`claude update`, `codex update`, `agy update`, `grok update`). 카탈로그 `agents.*.update`에 적고 `update_clis()`가 돌린 뒤 `--version`으로 앞뒤 판을 남긴다(`state/cli_update.json`). launch.sh는 하루 한 번, 워커를 띄우기 전에 동기로 돌린다(띄우는 중에 실행 파일이 바뀌지 않게). 네 CLI 합쳐 15초 안팎이었다. dry-run·`KIT_NO_CLI_UPDATE`·`auto_update: off`면 하지 않는다.
+- **snap 설치본은 건너뛴다:** snap이 관리하고, 워커로도 못 쓴다(orca CLI 실행 불가). Antigravity는 공식 설치본(`~/.local/bin/agy`, 스스로 업데이트)을 쓴다. Snap Store의 antigravity-cli는 공식 배포가 아니라 커뮤니티 포장본이다.
+
+## 9. v0.7 반영: 품질 = 공개 벤치마크, 잔여 한도 (2026-11-25)
+
+- **어떤 벤치마크인가:** 우리 라우팅은 "모델"이 아니라 "CLI 에이전트 × 모델 × effort"를 고른다. Terminal-Bench(tbench.ai) 공식 리더보드가 같은 단위(Claude Code · Opus 5.5 · max)로 해결률과 95% 신뢰구간을 낸다. 모델만 재는 지수(AA 지능 지수, SWE-bench Verified)는 실행 환경 차이를 담지 못한다(같은 Gemini 4 Neon이 범용 시험 환경 12.8%, Antigravity 안에서 39.0%라는 보도). SWE-bench Verified는 포화돼 기록처 한 곳이 새 모델 평가를 멈췄다.
+- **받는 방법:** 리더보드 페이지가 품은 데이터(이스케이프된 JSON)를 읽는다. 관리자가 `models.py bench`를 돌릴 때만 받고, 라우팅은 결과 파일만 읽는다(오프라인·재현). 키트 판은 `tools/bench_scores.yaml`, 프로젝트가 직접 받으면 `state/bench_scores.yaml`(더 새 것을 쓴다). 원래 표를 통째로 옮기지 않고 카탈로그에 해당하는 줄만 출처·날짜와 함께 둔다. AA는 무료 Data API(키, 하루 100회, 출처 표기 필수)로만, 키가 있을 때 참고값(지능 지수·출력 속도)으로 남긴다. 사이트를 긁지 않는다.
+- **환산:** 품질 = 5 × 해결률 ÷ 카탈로그 안 최고 해결률(최저 1). 처음엔 1 + 4 × 비율로 했더니 해결률 40%인 Haiku가 3.4가 돼 임계 경로의 계약 작업을 맡았다. 비례 환산이면 3.0이고 Sonnet(4.9)이 맡는다. 모델의 가장 좋은 effort 점수를 쓴다(대부분 max).
+- **판 맞추기:** 카탈로그 `bench_name: 'GPT-{v} Sol'`과 에이전트 `bench_agent: 'Codex'`로 줄을 찾고, 판은 family로 고른 판을 쓴다. 그 판 점수가 아직 없으면 바로 아래 판 점수를 쓰고 "옛 판"으로 적는다(새 판이 보통 같거나 낫다). 다른 CLI의 같은 모델 점수는 빌리지 않는다(Antigravity의 claude-opus는 Claude Code 점수가 있어도 "벤치 없음").
+- **벤치에서 바꾸지 않은 것:** 속도(평균 소요 시간에 이상치가 있다: Terra 2.1분, Haiku 2.3분인데 출력 토큰 386k), 소모(구독마다 한도 단위가 달라 출력 토큰을 구독끼리 비교할 수 없다). 둘 다 참고값으로만 남겼다. 강점 태그도 아직 사람이 정한다.
+- **벤치가 바꾼 판단:** Gemini 4 Carbon(64.5%)이 Neon(61.2%)보다 높아 카탈로그의 "Carbon은 가벼운 쪽" 추정이 틀렸다(cost 2.5, speed 3으로 고침). Grok 4.7은 38.8%로 추정(4)보다 낮다(2.9). Codex GPT-6.1 Terra는 53.3%로 추정(3)보다 높다(4.1).
+- **effort 곡선(참고):** 같은 모델의 effort별 점수가 있는 세 모델(GPT-6 Astra, Fable 5.1, Opus 5)에서 high와 max의 차이는 1~3%p, medium은 4~8%p, low는 9~18%p 낮았다. 출력 토큰은 max가 high의 1.5~2배다. pick_effort가 xhigh·max를 드물게 쓰는 근거로 둔다.
+- **잔여 한도:** Orca가 구독마다 사용률을 모은다(`orca account list --json` → `rateLimits`: 창마다 usedPercent·windowMinutes·resetsAt). Claude는 Fable 주간을 따로, Antigravity는 모델 묶음(Gemini / Claude and GPT)별로 센다. 키트는 숫자만 5분 캐시한다(계정 이메일 등은 남기지 않는다). 창 하나라도 98% 이상이면 초기화까지 제외한다(자동 쿨다운). 수동 쿨다운이나 하루 토큰 기준(`daily_soft_tokens`)과 달리 실제 한도를 본다. 주간 창은 절대 사용률이 아니라 지난 기간 비율과 비교한다(월요일에 38%면 빠르고, 금요일에 70%면 괜찮다). 쓸 수 있는 구독이 모두 소진이면 기본 에이전트로 밀어 넣지 않고 launch.sh가 보류한다.
+- **동점 규칙:** 실제 작업은 난이도 2~3에 몰리는데 동점도 거기 몰렸다(balanced d=3 coding 3자 동점). 전에는 카탈로그 순서와 부동소수 오차(0.35000000000000001 > 0.35)가 갈랐다. 이제 점수를 소수 6자리로 맞춘 뒤 부하 적은 구독 → 이 대역 실적 → 소모 적은 쪽 → 품질 → 키 이름 순으로 가리고, 동점이었으면 근거에 적는다.
+- **실적 대역:** 임계 경로 작업은 점수 계산에 난이도 +0.5를 쓰는데 실적 조회도 그 값으로 해서, dispatch.tsv에 남는 난이도(+0.5 전)와 대역이 어긋났다(3.0 → 기록 mid, 조회 high). 조회를 기록 대역으로 맞췄다.
+- **계정 전환은 하지 않는다:** 같은 구독에 다른 계정이 있고 여유가 있으면 제외 이유에 알리기만 한다. Orca 계정 선택은 사람의 다른 세션에도 영향을 주므로 키트가 바꾸지 않는다.

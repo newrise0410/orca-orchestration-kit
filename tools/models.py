@@ -2,6 +2,9 @@
 """모델 자동 라우팅 도구 (정책: orchestration/models.yaml, 카탈로그: orchestration/tools/model_catalog.yaml).
 
   python3 orchestration/tools/models.py discover            # 쓸 수 있는 구독·모델 확인 (CLI 모델 목록을 다시 읽는다)
+  python3 orchestration/tools/models.py update [에이전트..] [--check]   # 구독 CLI 업데이트 → 모델 목록·카탈로그 계열 최신화
+  python3 orchestration/tools/models.py bench [--aa]        # 공개 벤치마크(Terminal-Bench, 선택 AA) → 품질 근거 갱신·비교
+  python3 orchestration/tools/models.py quota               # 구독별 잔여 한도(Orca 집계)와 라우팅 영향(소진 제외·빠듯 벌점)
   python3 orchestration/tools/models.py route <ID> [...]    # 그 작업을 누구에게 줄지와 이유 (--review/--retry 모드)
   python3 orchestration/tools/models.py plan                # 투입 가능 작업 전체의 라우팅 미리보기
   python3 orchestration/tools/models.py stats               # 모델별 실적(학습 보정)·에이전트별 사용량
@@ -21,6 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import kitlib  # noqa: E402
 import routing  # noqa: E402
+import bench  # noqa: E402
 
 VERDICT = {"pass": 1.0, "minor": 0.7, "major": 0.3, "fail": 0.0}
 
@@ -42,18 +46,30 @@ def cmd_discover(a):
         conf = " · snap 격리(워커로 못 씀)" if info.get("confined") else ""
         print(f"- {ag}: {st}{conf}" + (f" · {info['error']}" if info.get("error") else ""))
     print("\n# 카탈로그 모델")
-    known = set()
-    for key, m in catalog["models"].items():
+    rcat = routing.resolve_catalog(catalog, disc)
+    for key, m in rcat["models"].items():
         ok, why = routing.availability(key, m, pol, disc)
-        known.update(routing.model_ids(m))
+        fam = f"  (계열 {m['family']} → {m.get('family_version')}판" + (f", 카탈로그 {m['resolved_from']}" if m.get("resolved_from") else "") + ")" \
+            if m.get("family_version") else ""
         print(f"- {'✓' if ok else '✗'} {key:18} {m.get('agent'):11} {m.get('model'):26} q{m.get('quality')} s{m.get('speed')} c{m.get('cost')}"
-              + ("" if ok else f"  ({why})"))
-    extra = {ag: sorted(set(info.get("models") or []) - known) for ag, info in disc.items()}
-    extra = {k: v for k, v in extra.items() if v}
-    if extra:
-        print("\n# 카탈로그에 없는 모델 (쓰려면 models.yaml models:에 넣는다)")
-        for ag, v in extra.items():
+              + (fam if ok else f"  ({why})"))
+        if ok and m.get("quality_src") and a.__dict__.get("verbose", True):
+            print(f"      품질 근거: {m['quality_src']}" + (f" (카탈로그 추정 {m['quality_catalog']})" if m.get("quality_catalog") is not None else ""))
+    extra = routing.unmatched_models(rcat, disc)
+    news = {ag: v[0] for ag, v in extra.items() if v[0]}
+    if news:
+        print("\n# 카탈로그에 없는 모델 (새 계열일 수 있다. 쓰려면 models.yaml models:에 넣는다)")
+        for ag, v in news.items():
             print(f"- {ag}: {', '.join(v[:12])}" + (" …" if len(v) > 12 else ""))
+    olds = sum(v[1] for v in extra.values())
+    if olds:
+        print(f"(아는 계열의 옛 판 {olds}개는 뺐다 — 계열은 가장 높은 판을 쓴다)")
+    b = catalog.get("bench") or {}
+    if b.get("tb"):
+        src = (b.get("sources") or {}).get("tb") or {}
+        print(f"\n벤치 점수: {src.get('name')} · {b.get('generated')} 받음 · {b.get('_path')} (갱신: models.py bench)")
+    else:
+        print("\n벤치 점수 없음: 품질은 카탈로그 추정값이다 (models.py bench로 받는다)")
     if not pol.get("_present"):
         print("\n참고: orchestration/models.yaml이 없어 launch.sh는 라우팅을 쓰지 않는다")
     return 0
@@ -67,10 +83,105 @@ def print_decision(tid, dec, verbose=True):
         print("  난이도 근거: " + " · ".join(dec["reasons"]))
     if dec.get("why"):
         print(f"  선택 근거: 점수 {dec.get('score')} · " + " · ".join(dec["why"]))
+    if dec.get("quality_src"):
+        print(f"  품질 {dec.get('quality')}: {dec['quality_src']}")
     if dec.get("alts"):
         print("  다음 후보: " + ", ".join(f"{k}({s})" for k, s in dec["alts"]))
     if dec.get("excluded"):
         print("  제외: " + "; ".join(f"{k} {v}" for k, v in list(dec["excluded"].items())[:8]))
+
+
+def cmd_update(a):
+    """구독 CLI 업데이트 → 모델 목록 다시 읽기 → 카탈로그와 대조."""
+    repo, cfg, catalog, pol = ctx(a)
+    print("# 구독 CLI " + ("버전 확인" if a.check else "업데이트"))
+    res = routing.update_clis(repo, catalog, pol, agents=a.agents or None, check_only=a.check,
+                              log=(lambda m: None) if a.quiet else (lambda m: print(m, flush=True)))
+    for ag, r in res.items():
+        ver = r.get("before") or ""
+        if r.get("status") == "갱신":
+            ver = f"{r['before']} → {r['after']}"
+        print(f"- {ag}: {r['status']}" + (f" {ver}" if ver else "") + (f" · {r['detail']}" if r.get("detail") else ""))
+    print()
+    return cmd_discover(a)
+
+
+def cmd_bench(a):
+    """공개 벤치마크(Terminal-Bench, 선택 AA)를 받아 bench_scores.yaml로 남기고 카탈로그 품질과 비교한다."""
+    import os
+    repo, cfg, catalog, pol = ctx(a)
+    url = bench.TB_URL.format(ver=a.tb_version)
+    try:
+        html = Path(a.tb_file).read_text(encoding="utf-8") if a.tb_file else bench.http_get(url)
+    except OSError as e:
+        print(f"Terminal-Bench를 받지 못했다: {e}", file=sys.stderr)
+        return 1
+    aa = None
+    if a.aa:
+        key = os.environ.get("AA_API_KEY")
+        if not key:
+            print("AA_API_KEY가 없어 Artificial Analysis는 건너뛴다 (무료 키: artificialanalysis.ai Insights Platform)", file=sys.stderr)
+        else:
+            try:
+                aa = bench.fetch_aa(key)
+            except (OSError, ValueError) as e:
+                print(f"Artificial Analysis 실패(건너뜀): {str(e)[:160]}", file=sys.stderr)
+    doc = bench.build(catalog, html, url, aa=aa)
+    if not doc["tb"]:
+        print(f"Terminal-Bench 페이지에서 카탈로그에 맞는 줄을 찾지 못했다(전체 {doc['sources']['tb']['rows_total']}줄). 페이지 꼴이 바뀌었을 수 있다", file=sys.stderr)
+        return 1
+    out = Path(a.out) if a.out else routing.state_dir(repo) / "bench_scores.yaml"
+    head = ("# 공개 벤치마크 점수 (models.py bench가 만든다. 손으로 고치지 말고 다시 받는다)\n"
+            "# 출처: Terminal-Bench " + url + (" · Artificial Analysis https://artificialanalysis.ai/" if aa is not None else "") + "\n")
+    if not a.dry_run:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(head + kitlib.yaml.safe_dump(doc, allow_unicode=True, sort_keys=False, width=200), encoding="utf-8")
+    print(f"# {doc['sources']['tb']['name']} · 전체 {doc['sources']['tb']['rows_total']}줄 중 카탈로그에 맞는 {len(doc['tb'])}줄"
+          + (f" · AA {len(doc.get('aa') or [])}개" if aa is not None else "") + ("" if a.dry_run else f" → {out}"))
+    cat2 = dict(catalog, bench=doc)
+    rcat = routing.resolve_catalog(cat2, routing.discover(repo, catalog))
+    print("키                  모델                      추정 → 벤치  근거")
+    for k, m in rcat["models"].items():
+        qc = m.get("quality_catalog")
+        print(f"{k:19} {str(m.get('model')):25} {('' if qc is None else str(qc)):>4} → {m.get('quality')!s:4}  {m.get('quality_src', '')}")
+    return 0
+
+
+def cmd_quota(a):
+    """구독별 잔여 한도(Orca 집계)와 그것이 라우팅에 주는 영향."""
+    repo, cfg, catalog, pol = ctx(a)
+    q = routing.read_quota(repo, refresh=True)
+    if not q:
+        print("Orca에서 한도를 읽지 못했다(orca account list --json). 라우팅은 한도를 보지 않고 고른다")
+        return 1
+    now = time.time()
+    print("# 잔여 한도 (Orca 집계 · 사용률 · 초기화 시각)")
+    for ag, spec in catalog["agents"].items():
+        info = q.get(spec.get("quota") or ag)
+        if not info:
+            print(f"- {ag}: 정보 없음")
+            continue
+        if info.get("status") != "ok":
+            print(f"- {ag}: {info.get('status')}")
+            continue
+        def fmt(ws):
+            return ", ".join(f"{n} {w['used']:.0f}%" + (f"({routing._hm(w['resets'])})" if w['resets'] > now else "") for n, w in sorted(ws.items()))
+        line = f"- {ag} ({info.get('plan') or '-'}): " + (fmt(info.get("windows") or {}) or "창 없음")
+        for g, ws in (info.get("groups") or {}).items():
+            line += f" · [{g}] " + fmt(ws)
+        if info.get("alt"):
+            line += f" · 다른 계정 {len(info['alt'])}개: " + " / ".join(fmt(x) for x in info["alt"])
+        print(line)
+    rcat = routing.resolve_catalog(catalog, routing.discover(repo, catalog))
+    print("\n# 라우팅 영향")
+    for k, m in rcat["models"].items():
+        ex, adj, why = routing.quota_effect(m, rcat["agents"], q, pol)
+        if ex or adj:
+            print(f"- {k:18} " + (f"제외: {ex}" if ex else f"{adj:+.2f} ({', '.join(why)})"))
+    cf = routing.quota_cfg(pol)
+    print(f"(기준: {cf['hard_percent']}% 이상 제외 · 세션 {cf['session_soft']}% 넘으면 벌점 · 주간은 기간 대비 {cf['pace_margin']}%p 넘게 앞서면 벌점,"
+          f" {cf['use_it_hours']}시간 안에 초기화되는데 40% 넘게 남으면 가점 — models.yaml routing.quota)")
+    return 0
 
 
 def cmd_route(a):
@@ -203,6 +314,17 @@ def main(argv=None):
     ap.add_argument("--repo")
     sp = ap.add_subparsers(dest="cmd", required=True)
     sp.add_parser("discover")
+    p = sp.add_parser("update")
+    p.add_argument("agents", nargs="*")
+    p.add_argument("--check", action="store_true", help="업데이트하지 않고 버전과 카탈로그만 본다")
+    p.add_argument("-q", "--quiet", action="store_true")
+    sp.add_parser("quota")
+    p = sp.add_parser("bench")
+    p.add_argument("--tb-version", default=bench.TB_DEFAULT)
+    p.add_argument("--tb-file", help="받아 둔 리더보드 페이지(오프라인·시험)")
+    p.add_argument("--aa", action="store_true", help="Artificial Analysis 무료 API도 본다(AA_API_KEY)")
+    p.add_argument("--out", help="기본: orchestration/state/bench_scores.yaml (키트 관리자는 tools/bench_scores.yaml)")
+    p.add_argument("--dry-run", action="store_true")
     p = sp.add_parser("route")
     p.add_argument("ids", nargs="+")
     g = p.add_mutually_exclusive_group()
@@ -223,7 +345,7 @@ def main(argv=None):
     p.add_argument("verdict", choices=list(VERDICT))
     p.add_argument("--note")
     a = ap.parse_args(argv)
-    return {"discover": cmd_discover, "route": cmd_route, "plan": cmd_plan, "stats": cmd_stats,
+    return {"discover": cmd_discover, "update": cmd_update, "bench": cmd_bench, "quota": cmd_quota, "route": cmd_route, "plan": cmd_plan, "stats": cmd_stats,
             "cooldown": cmd_cooldown, "feedback": cmd_feedback}[a.cmd](a)
 
 

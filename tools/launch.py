@@ -126,6 +126,15 @@ def main(argv=None):
     rv = cfg.get("review") or {}
     rc = 0
     live, launched = None, {}
+    # ── 구독 CLI 자동 업데이트 (routing.auto_update: daily 기본 · weekly · off). 하루 한 번, 워커를 띄우기 전에만
+    catalog0, pol0 = routing.load(repo)
+    if routing.enabled(pol0) and not a.dry_run and not os.environ.get("KIT_NO_CLI_UPDATE") and routing.update_due(repo, pol0):
+        print("구독 CLI 업데이트 (하루 한 번 · 끄려면 models.yaml routing.auto_update: off)")
+        res = routing.update_clis(repo, catalog0, pol0, log=lambda m: print(m, flush=True))
+        for ag, r in res.items():
+            if r.get("status") in ("갱신", "실패"):
+                print(f"  {ag}: {r['status']} {r.get('before', '')}" + (f" → {r['after']}" if r.get("status") == "갱신" else f" ({r.get('detail')})"))
+        routing.discover(repo, catalog0, refresh=True)
     for tid in a.ids:
         t = tasks.get(tid)
         print(f"\n[{tid}]")
@@ -187,6 +196,7 @@ def main(argv=None):
             effort = a.effort or t.get("effort")
         rkey, rdiff, rjev = "", "", ""
         catalog, pol = routing.load(repo)
+        catalog = routing.resolve_catalog(catalog, routing.discover(repo, catalog))
         pinned = t.get("route") if mode != "review" else None
         if pinned and not (agent or model):
             m = catalog["models"].get(str(pinned))
@@ -213,6 +223,10 @@ def main(argv=None):
                     print(f"    선택 근거: 점수 {dec['score']} · " + " · ".join(dec["why"]))
                     if dec["alts"]:
                         print("    다음 후보: " + ", ".join(f"{k}({s})" for k, s in dec["alts"]))
+            elif dec.get("quota_blocked"):
+                print(f"  보류: {routing.describe(dec)} — 쓸 수 있는 구독의 한도가 모두 찼다. 초기화 뒤 다시 띄운다 (--agent로 강제)", file=sys.stderr)
+                rc = 1
+                continue
             else:
                 print(f"  라우팅: {routing.describe(dec)} → orca.agent 기본값으로 띄운다", file=sys.stderr)
         agent = agent or kitlib.cfg_get(cfg, "orca.agent", "claude") or "claude"
