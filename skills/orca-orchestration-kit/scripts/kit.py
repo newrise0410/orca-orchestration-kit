@@ -656,7 +656,9 @@ def cmd_upgrade(a):
     if not a.apply:
         print("\n(미리보기: 적용하려면 사용자 확인 뒤 --apply. 자동 병합은 그대로 쓰고, 충돌·키트 밖 파일·seed는 <파일>.kit-new로 쓴다."
               " 키트 판으로 덮어쓰려면 --overwrite-conflicts)")
+        print("(적용 직전에 매니저에게 알린다: 적용이 끝날 때까지 기록 커밋을 미루거나 경로를 지정해 담게 한다 — 키트 변경이 엉뚱한 커밋에 섞이지 않게)")
         return 0
+    touched = []
     for dst, state, cur, new, merged, e in changes:
         if new is None or state.startswith("삭제됨"):
             continue
@@ -667,19 +669,26 @@ def cmd_upgrade(a):
             text = merged if merged is not None and state.startswith("충돌") else new
             p.with_name(p.name + ".kit-new").write_text(text, encoding="utf-8")
             print(f"  ! {dst}.kit-new (직접 합친 뒤 지운다)")
+            touched.append(dst)   # 합친 결과가 이 경로에 들어간다
             continue
         p.write_text(merged if state.startswith("자동 병합") else new, encoding="utf-8")
         if e.get("mode"):
             os.chmod(p, int(str(e["mode"]), 8))
         base[dst] = sha(new)
+        touched.append(dst)
         print(f"  ~ {dst}" + ("  (자동 병합)" if state.startswith("자동 병합") else ""))
     if gi_state:
+        touched.append(".gitignore")
         (target / ".gitignore").write_text(gi_new, encoding="utf-8")
         print(f"  ~ .gitignore  (키트 블록 {gi_state}. 이제 무시되지 않는 파일은 'git status'로 보고 git add 한다)")
     inst["files"], inst["kit_version"] = base, v["KIT_VERSION"]
     inst["kit_commit"] = kit_commit()
     ip.write_text(json.dumps(inst, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    touched.append(".orca-kit/installed.json")
     print(f"적용 완료. .kit-new가 있으면 합친 뒤 지우고, 매니저에게 커밋을 지시한다: '[L0] orchestration kit v{v['KIT_VERSION']} upgrade'")
+    print("매니저 커밋은 키트가 바꾼 경로만 담는다(그사이 매니저 기록 변경이 섞이지 않게, 키트 변경이 기록 커밋에 섞이지 않게):")
+    print("  git add -- " + " ".join(shlex.quote(x) for x in sorted(set(touched))))
+    print(f"  git commit -m '[L0] orchestration kit v{v['KIT_VERSION']} upgrade'")
     return 0
 
 

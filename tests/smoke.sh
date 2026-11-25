@@ -167,7 +167,9 @@ check "옛 블록이면 대시보드 도구가 무시됨(재현)" bash -c "cd $U
 o=$($KIT upgrade --target "$U" --summary 2>&1)
 check "upgrade 미리보기: .gitignore 키트 블록 갱신" has "$o" ".gitignore: 키트 블록 갱신"
 check "미리보기는 .gitignore를 바꾸지 않음" grep -qx 'dashboard/' "$U/.gitignore"
-$KIT upgrade --target "$U" --apply --summary >/dev/null 2>&1
+o=$($KIT upgrade --target "$U" --apply --summary 2>&1)
+check "upgrade 적용: 매니저 커밋용 'git add -- <키트가 바꾼 경로만>'" bash -c 'l=$(grep "^  git add -- " <<<"$0"); grep -q "\.gitignore" <<<"$l" && grep -q "\.orca-kit/installed.json" <<<"$l" && ! grep -q -- " -A\| \.$\| orchestration/ " <<<"$l" && grep -q "orchestration kit v.* upgrade" <<<"$0"' "$o"
+check "upgrade 미리보기: 적용 전 매니저에게 알리라는 안내" bash -c "$KIT upgrade --target $U --summary | grep -q '적용 직전에 매니저에게 알린다'"
 check "upgrade 적용: 블록 갱신 + 블록 밖 줄 보존" bash -c "cd $U && grep -qx '/dashboard/' .gitignore && grep -qx 'mine.log' .gitignore && ! git check-ignore -q orchestration/tools/dashboard/build.py && git check-ignore -q dashboard/index.html"
 check "다시 적용해도 .gitignore는 그대로" bash -c "! $KIT upgrade --target $U --summary | grep -q '.gitignore'"
 
@@ -379,10 +381,20 @@ if "inbox" in a:
     mail = os.environ.get("FAKE_SW_MAIL", "")
     lo = {"filter": "› 경계 입력 시험을 이어 간다\n\nⓘ This content can’t be shown\n  We take extra care with some cybersecurity requests. If you’re doing authorized security work, apply for Daybreak to\n  get broader access.\n  Learn more: https://help.openai.com/en/articles/20001326\n\n› gpt-6.2-sol · 41% context left",
           "noise": "문서 3.2절: 차단되면 화면에 'This content can’t be shown'이 뜬다고 적혀 있다\n› 다음 절로 간다",
-          "errored": "Error: stream disconnected before completion\n› 다시 시도하려면 Enter"}.get(mail)
-    msgs = [{"id": "msg_e5c1", "type": "escalation", "handled": True, "subject": "Worker stopped on an error without reporting",
-             "body": "Worker stopped on an error without reporting (stopReason=errored).\nLast output:\n" + lo,
-             "payload": {"dispatchId": os.environ.get("FAKE_SW_MAIL_DID", ""), "taskId": "task_5a1", "stopReason": "errored"}}] if lo else []
+          "errored": "Error: stream disconnected before completion\n› 다시 시도하려면 Enter",
+          "quota": "⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 2h22m45s.\n› gemini-4-neon"}.get(mail)
+    # Orca 실제 꼴(현장 확인): --full이 없으면 본문이 221자에서 잘리고 payload는 taskId·dispatchId뿐.
+    # --full이면 본문 전체, payload는 JSON 문자열(stopReason 포함). '…stopped on an error…'는 제목에만 있다.
+    body = ("Dispatch " + os.environ.get("FAKE_SW_MAIL_DID", "") + " ended its turn on an error and did not send worker_done. "
+            "The coordinator should inspect the worker, decide whether to retry, and release its terminal when done. "
+            "Worker state: running; liveness: idle.\nLast output:\n" + (lo or ""))
+    did_ = os.environ.get("FAKE_SW_MAIL_DID", "")
+    if "--full" in a:
+        pl = json.dumps({"taskId": "task_5a1", "dispatchId": did_, "stopReason": "errored"})
+    else:
+        body, pl = body[:221] + "… (truncated; --full)", {"taskId": "task_5a1", "dispatchId": did_}
+    msgs = [{"id": "msg_stop_e5c1", "type": "escalation", "handled": True, "subject": "Worker stopped on an error without reporting",
+             "body": body, "payload": pl}] if lo else []
     out({"ok": True, "result": {"messages": msgs}})
 if "worker-stop" in a or "worker-release" in a or a.startswith("orchestration send"): out({"ok": True, "result": {}})
 if a.startswith("automations create"): out({"ok": True, "result": {"automation": {"id": "auto-1", "enabled": True}}})
@@ -551,6 +563,16 @@ o=$(FAKE_SW=free FAKE_SW_DID=ctx_9z9 FAKE_SW_MAIL=filter FAKE_SW_MAIL_DID=ctx_5a
 check "필터 중단(메일): 이미 멈춘 워커는 stop 생략 · 이어받기 · codex-sol은 이 작업 후보에서 뺌" bash -c 'grep -q "^\[전환\] X-SW (ctx_5a4, codex-sol): 필터 중단" <<<"$0" && grep -q "worker-stop 생략" <<<"$0" && ! grep -q "worker-stop --dispatch ctx_5a4" "$1/calls.log" && grep -q "worker-start" "$1/calls.log" && ! grep -q -- "worker-start .*--model gpt-6.2-sol" "$1/calls.log" && tail -1 orchestration/state/quota_switch.tsv | grep -q "	ctx_5a4	codex	codex-sol	.*	filter$"' "$o" "$W/sw"
 o=$(FAKE_SW=free FAKE_SW_DID=ctx_9z9 FAKE_SW_MAIL=filter FAKE_SW_MAIL_DID=ctx_5a4 $SW python3 $T/status.py --stall 2>&1)
 check "넘긴 dispatch의 메일은 다시 잡지 않는다" bash -c '! grep -q "ctx_5a4" <<<"$0"' "$o"
+check "메일: payload가 JSON 문자열이어도 · errored는 제목·본문(ended its turn on an error)으로도" python3 -c "
+import sys; sys.path.insert(0,'$T'); import kitlib, status
+assert kitlib.msg_payload({'payload': '{\"dispatchId\": \"d\", \"stopReason\": \"errored\"}'}) == {'dispatchId': 'd', 'stopReason': 'errored'}
+assert kitlib.msg_payload({'payload': 'not json'}) == {} and kitlib.msg_payload({}) == {}
+assert status.errored({'subject': 'Worker stopped on an error without reporting', 'payload': {'dispatchId': 'd'}})
+assert status.errored({'body': 'Dispatch d ended its turn on an error and did not send worker_done.'})
+assert not status.errored({'subject': 'done', 'body': 'ok', 'payload': '{}'})"
+printf 'X-SW\ttask_5a8\tctx_5a8\tx-sw\t2026-12-31 12:00:00\tantigravity\tgemini-4-neon-medium\t\tagy-gemini-neon\t3.0\t\n' >> orchestration/state/dispatch.tsv
+o=$(FAKE_SW=free FAKE_SW_DID=ctx_9z9 FAKE_SW_MAIL=quota FAKE_SW_MAIL_DID=ctx_5a8 $SW python3 $T/status.py --stall 2>&1)
+check "메일: 한도로 멈춘 워커(quota reached·Resets in)는 필터 중단도 오류 중단도 아니다" bash -c '! grep -q "필터 중단\|오류 중단" <<<"$0"' "$o"
 printf 'X-SW\ttask_5a7\tctx_5a7\tx-sw\t2027-01-01 10:00:00\tcodex\tgpt-6.2-sol\thigh\tcodex-sol\t3.0\t\n' >> orchestration/state/dispatch.tsv
 o=$(FAKE_SW=free FAKE_SW_DID=ctx_9z9 FAKE_SW_MAIL=errored FAKE_SW_MAIL_DID=ctx_5a7 $SW python3 $T/status.py --stall 2>&1)
 check "오류 중단: errored인데 한도도 차단 문구도 아니면 확인하라고 알림" has "$o" "오류 중단 X-SW (ctx_5a7)"

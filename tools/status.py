@@ -113,7 +113,8 @@ def collect(repo, cfg, a):
     for label, rid in (("마스터", kitlib.cfg_get(cfg, "orca.master_run", "")), ("매니저(작업 Run)", kitlib.cfg_get(cfg, "orca.work_run", ""))):
         if not rid:
             continue
-        mb = orca_json(["orchestration", "inbox", "--terminal", f"run:{rid}", "--limit", "100"])
+        # --full: 없으면 본문이 221자에서 잘려(… truncated) escalation의 Last output이 빠진다(현장 확인)
+        mb = orca_json(["orchestration", "inbox", "--terminal", f"run:{rid}", "--limit", "100", "--full"])
         msgs = (mb.get("result") or {}).get("messages") or []
         o["mail"][label] = {"run": rid, "error": None if mb.get("ok", False) else (mb.get("error") or {}).get("message"),
                             "unhandled": [m for m in msgs if m.get("handled") is False]}
@@ -250,9 +251,16 @@ def last_output(body):
     return m.group(1) if m else ""
 
 
+# 한도로 멈춘 워커도 errored escalation을 보낸다(예: agy "⚠ Individual quota reached … Resets in 2h22m"). 한도는 '한도 정지'가 맡는다.
+QUOTA_SCREEN_RX = re.compile(r"quota (?:reached|exceeded)|usage limit|rate limit|hit your (?:usage )?limit|resets in \d|limit will reset", re.I)
+
+
 def errored(m):
-    pl = m.get("payload") or {}
-    return str(pl.get("stopReason") or "").lower() == "errored" or bool(re.search(r"stopReason\W{0,3}errored|stopped on an error", str(m.get("body") or ""), re.I))
+    """errored escalation인가: payload stopReason(--full일 때만 온다) · 제목('Worker stopped on an error') · 본문('ended its turn on an error')."""
+    pl = kitlib.msg_payload(m)
+    text = f"{m.get('subject') or ''}\n{m.get('body') or ''}"
+    return str(pl.get("stopReason") or "").lower() == "errored" or bool(
+        re.search(r"stopReason\W{0,3}errored|stopped on an error|ended (?:its|the) turn on an error", text, re.I))
 
 
 def turn_stops(repo, o, rows, skip):
@@ -276,10 +284,13 @@ def turn_stops(repo, o, rows, skip):
     found, errs = {}, {}
     live = {w["dispatch"] for w in o.get("workers") or []}
     for m in o.get("escalations") or []:
-        did = (m.get("payload") or {}).get("dispatchId")
+        did = kitlib.msg_payload(m).get("dispatchId")
         if not did or did in done or did in found or stale(did) or not errored(m):
             continue
-        ev = screen_match(last_output(m.get("body")))
+        lo = last_output(m.get("body"))
+        ev = screen_match(lo)
+        if not ev and QUOTA_SCREEN_RX.search(lo):
+            continue   # 한도로 멈춘 것 — 한도 정지·quota_switch가 맡는다
         if ev:
             found[did] = dict(info(did), kind="filter", evidence=ev, source="메일 Last output", message=m.get("id"))
         else:

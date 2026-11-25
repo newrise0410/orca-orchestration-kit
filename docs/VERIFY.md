@@ -244,3 +244,8 @@ v0.4.1(10장)에서 snap 설치본은 작업 폴더 신뢰 확인 창에 막혔�
 - `worker-read --source terminal` 실제 꼴: 작은 워커(claude haiku, keep-open)를 띄워 읽고 해제했다. `result.terminal = {handle, status, tail: [화면 줄…]}`, `result.status = {worker, terminal, liveness}`.
 - 시험 146/146(이전 139 + 7): 화면 안내 줄 판정(굽은·곧은 따옴표, 아이콘 떼기, 문장 속 인용 무시, Claude Usage Policy), 화면 끝에서 필터 중단, 메일 Last output에서 멈춘 워커의 필터 중단, 문서 인용만 있는 메일은 오류 중단, 멈춘 워커는 stop 생략하고 이어받기(codex-sol은 그 작업 후보에서 제외), 넘긴 dispatch의 메일은 다시 안 잡음, errored인데 문구 없음 → 오류 중단.
 
+## 22. v0.8.5: 실제 escalation 메일 꼴·키트 적용 커밋 (2026-11-25)
+- 현장 확인(실제 메일 3통에 키트 함수를 돌림): `inbox`를 `--full` 없이 읽으면 본문이 221자에서 `… (truncated; --full)`로 잘리고 payload는 `{taskId, dispatchId}`뿐. `--full`이면 본문 전체(1,274자)와 `"stopReason":"errored"`가 오지만 payload가 JSON 문자열. '…stopped on an error…'는 제목에만 있고 본문은 '… ended its turn on an error'. 필터 메일 2통의 Last output에서는 `This content can’t be shown`이 잡혔고, 한도 메일(agy `⚠ Individual quota reached … Resets in 2h22m45s.`)은 안 잡혔다.
+- 수정: `inbox --full`, `kitlib.msg_payload`(문자열이면 JSON으로), errored = payload stopReason · 제목 · 본문 문구, 한도 문구가 있는 Last output은 건너뜀.
+- 시험 150/150(이전 146 + 4): 가짜 Orca가 실제 꼴로 준다(`--full` 없으면 잘린 본문·stopReason 없는 dict, `--full`이면 문자열 payload). payload 풀기·errored 판정, 한도 메일은 필터·오류 중단 아님, `upgrade --apply`가 `git add -- <키트가 바꾼 경로>`(.gitignore·installed.json 포함, `-A`·`.`·`orchestration/` 없음)를 출력, 미리보기 끝에 '적용 직전에 매니저에게 알린다'.
+
