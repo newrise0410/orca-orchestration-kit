@@ -67,7 +67,7 @@ def main(argv=None):
             kinds = [name for name, rx in rules if rx.search(ln)]
             for m in EMAIL.finditer(ln):
                 dom = m.group(1).lower()
-                if m.group(0).lower() != commit_email and not any(dom == d or dom.endswith("." + d) or dom.endswith(d) for d in allow):
+                if m.group(0).lower() != commit_email and not any(dom == d or dom.endswith("." + d) for d in allow):
                     kinds.append("이메일")
             run = run + 1 if ENV_LINE.match(ln) else 0
             if run == 5:

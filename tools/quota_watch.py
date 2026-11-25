@@ -10,6 +10,8 @@
 precheck는 할 일(한도 정지 · 한도가 풀린 대기, quota_switch.py --due와 같은 판정)이 있으면 매니저 Run
 (kit.yaml orca.work_run)에 메일을 보내 매니저를 깨우고, **언제나 1로 끝나** 에이전트를 띄우지 않는다(구독을 쓰지 않는다).
 같은 내용은 remind_minutes(기본 30분)마다 한 번만 다시 알린다. 판단과 전환은 깨어난 매니저가 quota_switch.py로 한다.
+안전장치: 사전 확인에 부수 효과를 얹는 것은 원래 용도와 다르다. Orca가 이 의미를 바꿔 실행 기록에 에이전트 실행
+(skipped_precheck가 아닌 것)이 생기면, 다음 사전 확인이 예약 실행을 스스로 끄고 매니저에게 알린다(10분마다 에이전트가 뜨지 않게).
 """
 import argparse
 import json
@@ -80,9 +82,34 @@ def pending(repo, cfg):
     return [q for q in stalls if q["dispatch"] not in waiting] + filt, due
 
 
+def guard(repo, run):
+    """이 예약 실행이 에이전트를 띄운 적이 있으면(사전 확인 의미가 바뀜) 끄고 알린다 → 꺼졌으면 True."""
+    st = read_state(repo)
+    aid = st.get("automation_id")
+    if not aid or st.get("guard_disabled"):
+        return bool(st.get("guard_disabled"))
+    d = run_json(["automations", "runs", "--id", aid])
+    runs = (d.get("result") or {}).get("runs") or [] if d.get("ok") else []
+    since = float(st.get("installed", 0)) * 1000
+    ran = [r for r in runs if not str(r.get("status", "")).startswith("skipped") and float(r.get("scheduledFor") or r.get("startedAt") or 0) >= since]
+    if not ran:
+        return False
+    off = run_json(["automations", "edit", "--id", aid, "--disabled"])
+    st.update(guard_disabled=time.time(), guard_status=str(ran[0].get("status")))
+    write_state(repo, st)
+    if run:
+        run_json(["orchestration", "send", "--to", f"run:{run}", "--type", "status", "--subject", "한도 점검 예약을 껐다",
+                  "--body", f"예약 실행 {aid}이 에이전트를 띄웠다(실행 상태 {ran[0].get('status')}). Orca의 사전 확인 의미가 바뀐 것 같아 "
+                            + ("예약을 껐다" if off.get("ok") else "끄려 했으나 실패했다 — Orca에서 직접 끈다")
+                            + ". 키트 쪽에 알리고, 확인 전까지 정지 점검(status.py --stall)을 손으로 본다."])
+    return True
+
+
 def cmd_precheck(repo, cfg, a):
     run = kitlib.cfg_get(cfg, "orca.work_run", "")
     if not run:
+        return 1
+    if guard(repo, run):
         return 1
     stalls, due = pending(repo, cfg)
     if not stalls and not due:

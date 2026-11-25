@@ -52,9 +52,10 @@ def orca_json(args):
 
 
 def all_workers(run_id, pages=20):
+    """Run의 워커 전부(100개씩 페이지를 넘긴다). run_id가 비면 이 코디네이터의 기본 Run."""
     out, cursor = [], None
     for _ in range(pages):
-        args = ["orchestration", "worker-list", "--run", run_id, "--limit", "100"] + (["--cursor", cursor] if cursor else [])
+        args = ["orchestration", "worker-list"] + (["--run", run_id] if run_id else []) + ["--limit", "100"] + (["--cursor", cursor] if cursor else [])
         d = orca_json(args)
         if not d.get("ok", False):
             return out, (d.get("error") or {}).get("message", "조회 실패")

@@ -308,7 +308,7 @@ def main(argv=None):
         if prev:
             lines.append(f"\n### 지적\n{prev}")
         notes.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        with open(routing.state_dir(repo) / "quota_switch.tsv", "a", encoding="utf-8") as f:
+        with kitlib.locked(repo), open(routing.state_dir(repo) / "quota_switch.tsv", "a", encoding="utf-8") as f:
             f.write("\t".join([dt.datetime.now().strftime("%F %T"), tid, q["dispatch"], q["agent"], q["key"], reason.replace("\t", " "),
                                snap["branch"], suffix, "filter" if filt else "quota"]) + "\n")
         # 고른 구독을 그대로 넘긴다(kit.yaml review.agent 같은 고정이 한도 찬 구독을 다시 고르지 않게)

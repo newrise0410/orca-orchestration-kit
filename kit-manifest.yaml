@@ -6,7 +6,7 @@
 #   module: core(항상) / run(실행 격리) / ros2(ROS 2 프로필) / review(검토 단계)
 #   render: true면 {{...}}를 채운다. keep: 설치 때 남겨 둘 자리표시자(부트스트랩에서 채움)
 #   mode:  실행 권한 등 (기본 644)
-version: 0.9.0
+version: 0.9.1
 
 files:
   # ── 공통 규칙
@@ -89,4 +89,4 @@ dirs: [orchestration/specs, docs/05_reports, docs/07_process/snapshots]
 
 # .gitignore에 넣을 줄 (표시 블록 안에서 관리. init이 넣고 upgrade가 이 목록과 맞춘다)
 # /dashboard/는 저장소 루트의 대시보드 출력만 가리킨다. 앞의 /가 없으면 orchestration/tools/dashboard/(도구)까지 무시된다.
-gitignore: [/dashboard/, .runs/, "*.kit-new", __pycache__/, orchestration/state/models_cache.json, orchestration/state/cooldown.json, orchestration/state/jev_cache.json, orchestration/state/cli_update.json, orchestration/state/bench_scores.yaml, orchestration/state/quota_cache.json, orchestration/state/quota_wait.json, orchestration/state/quota_watch.json]
+gitignore: [/dashboard/, .runs/, "*.kit-new", __pycache__/, orchestration/state/models_cache.json, orchestration/state/cooldown.json, orchestration/state/jev_cache.json, orchestration/state/cli_update.json, orchestration/state/bench_scores.yaml, orchestration/state/quota_cache.json, orchestration/state/quota_wait.json, orchestration/state/quota_watch.json, "orchestration/state/.*.lock"]
