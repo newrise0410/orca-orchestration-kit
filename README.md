@@ -10,7 +10,7 @@ AI 에이전트 다중 세션으로 소프트웨어를 개발하는 워크플로
 - 단일 HTML 대시보드(오프라인, 작업 보드), 실행 격리 모듈(선택), 검토 단계 모듈(선택)
 - 배포: Claude Code 플러그인 마켓플레이스(자동 업데이트) 또는 심볼릭 링크
 
-버전: **v0.10.0** (2026-11-25) · 라이선스: [Apache-2.0](LICENSE)
+버전: **v0.10.1** (2026-11-25) · 라이선스: [Apache-2.0](LICENSE)
 
 ---
 
@@ -231,6 +231,7 @@ docs/                            VERIFY.md  DESIGN-NOTES.md  LESSONS.md
 
 | 버전 | 일자 | 내용 |
 |---|---|---|
+| v0.10.1 | 2026-11-25 | **전체 시험 슬롯(현장 피드백).** `slot.sh`가 슬롯이 여러 개일 때 1번 잠금만 기다리던 결함: 이제 `KIT_SLOT_POLL`초(기본 5)마다 모든 슬롯을 다시 보고 먼저 빈 것을 잡는다. 기다리는 동안·잡은 뒤 `<공용 git>/orca-kit/slots/`에 표시 파일(시각·워크트리·명령)을 남기고, `status.py`가 그것으로 워커 줄에 '슬롯 대기 N분째'를 붙이고 정지 점검에 '슬롯 대기'(그 워커의 '커밋 없음' 대신)와 '슬롯 줄'(대기 ≥ 슬롯 수이거나 10분 넘게: 잡은 쪽·대기 수·이 기계 기준 제안 슬롯 수)을 보인다. 설치 때 `slots.test`를 기계의 코어·메모리로 제안한다(코어 4개·메모리 8 GiB당 1, 1~8, `--test-slots`로 지정). 종료코드는 명령 그대로 |
 | v0.10.0 | 2026-11-25 | **워크트리 정리(`worktree_sweep.py`)**: Orca 워크트리가 쌓이는 문제(실사용 저장소 하나에 워커 워크트리 59개). 이 저장소의 Orca 워크트리마다 어느 작업 것인지(Orca 워커 → dispatch.tsv 워크트리 이름 → 브랜치 `req/<ID>`) 찾고 '정리 / 확인 필요 / 남겨 둠'으로 나눈다. **정리**는 잃을 것이 없을 때만: 메인·고정(pin)·자식 있는 워크트리가 아니고, 진행 중 디스패치 없음, 커밋하지 않은 변경 없음, 1시간 넘게 쉼, 그리고 구현은 작업 merged + HEAD가 기준·메인에 들어 있음, 검토는 보고서 폴더가 메인에 들어왔거나 대상 merged, 통합(L1)은 merged + HEAD가 메인에. 지울 때 끝난 워커 터미널 해제 → `orca worktree rm --delete-branch`(워크트리 로컬 브랜치만, `req/*`·`int/*`는 이력이라 둔다) → 정리 훅 → 그 작업의 한도 전환 보존 브랜치. 주인 없는 워크트리는 `--orphans`로만(HEAD가 메인에 다 있을 때). `launch.sh`가 한 시간에 한 번 '정리'만 저절로 한다(`kit.yaml cleanup.auto_sweep`, 기본 true). 정지 점검에 '워크트리 정리 / 확인 필요' 줄. 설정이 없는 저장소는 메인 워크트리의 현재 브랜치(예: master)를 메인으로 본다 |
 | v0.9.1 | 2026-11-25 | **코드 검토 지적 반영.** `cleanup_worker.sh`가 워커 목록을 페이지를 넘겨 전부 읽는다(100개 넘는 Run에서 끝나지 않은 디스패치를 놓치던 것). `hooks/pre-push`가 kit.yaml·PyYAML을 못 읽으면 **막는다**(전에는 빈 설정으로 통과해 보호가 조용히 꺼졌다. 설정 없이 쓰는 저장소는 `KIT_HOOK_NO_CONFIG_OK=1`). `launch.py`가 Orca ID를 JSON으로 읽고(정규식은 대비책), dispatch.tsv·tasks.yaml 쓰기를 파일 잠금(`state/.state.lock`)으로 감싸며(task_status·quota_switch도), task-create 뒤 worker-start가 실패하면 Orca Task를 `failed/cancelled`로 닫는다(고아 Task). `evidence_lint`의 이메일 허용 도메인을 정확히 비교한다(`notexample.com`이 `example.com`으로 통과하던 것). `quota_watch` 안전장치: 예약 실행 기록에 에이전트 실행이 생기면(사전 확인 의미가 바뀜) 스스로 끄고 매니저에게 알린다. `auto_update`는 기본 daily를 유지하고 재현성이 필요한 구간에서 off를 쓰라고 적었다 |
 | v0.9.0 | 2026-11-25 | **범위 관리(교훈 L-22, 현장: 투입의 약 80%가 보완·검토)**. (1) tasks.yaml `guarantees`(보장하는 것)·`out_of_scope`(범위 밖) 닫힌 목록: 구현 명세에 절로 붙고 검토 명세는 그 항목을 깨는 실행 반례만 차단으로 삼는다. `validate_dag`가 L1·L2 투입 전 작업에 목록이 없거나 '언제나·모든·완전히' 같은 열린 약속이 있으면 경고. (2) 핵심 약속 점검표 `orchestration/checklist.md`(seed, '## 항목' 절): 구현·보완·이어받기 명세에 붙어 워커가 항목마다 시험 이름을 보고하고, 검토 명세에도 붙어 먼저 본다. (3) `models.py feedback --category`로 차단 계열을 남기면 같은 작업에서 같은 계열이 2회 연속(`kit.yaml review.scope_escalate_after`)일 때 정지 점검이 '범위 결정 필요', 계열이 달라도 3회 연속이면 '검토 반복'(--no-orca에서도). (4) 검토 대체 `routing.cross_review: model`: 독립 구독이 모자라면 같은 구독의 다른 모델 허용(한도 전환 포함). 구현한 모델 자신은 어느 설정에서도 −3 더 깎인다. 현장 적용은 이정표에 묶는다(`docs/UPGRADE-NOTES.md`) |

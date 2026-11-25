@@ -58,7 +58,7 @@ review:
 
 # 워크트리 사이 동시 실행 슬롯 (orchestration/tools/slot.sh <이름> -- <명령>)
 slots:
-  test: 1
+  test: {{TEST_SLOTS}}                # {{TEST_SLOTS_NOTE}}
 
 # 명세 문구
 spec_text:

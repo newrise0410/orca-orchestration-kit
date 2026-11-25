@@ -13,6 +13,8 @@
               → quota_switch.py (진행분 보존 → 다른 구독으로 이어받기, 그 모델은 이 작업 후보에서 뺀다)
   오류 중단   errored escalation인데 한도도 차단 문구도 아님 → 메일의 Last output·worker-read로 직접 확인
   attention   Orca가 워커에 주의 표시(입력 대기 프롬프트 등) → worker-show / worker-read로 원인 확인
+  슬롯 대기   워커가 slot.sh 줄에서 기다린다(전체 시험 동시 수 제한). 일하지 않는 것이 아니라 차례를 기다리는 중이라 '커밋 없음' 대신
+              이것을 보인다. 줄이 길면(대기 ≥ 슬롯 수 또는 10분 넘게) '슬롯 줄' 한 줄과 이 기계 기준 제안 슬롯 수를 같이 보인다
   커밋 없음    진행 중인데 마지막 커밋과 이 투입의 시작 중 늦은 쪽이 stale-min보다 오래됨 → worker-read로 화면 끝 확인
               (보완 워커가 앞 차수와 같은 브랜치를 쓰면 앞 차수 커밋이 마지막 커밋이라, 투입 시각이 더 늦으면 그것을 기준으로 잰다)
   running 고아 tasks.yaml은 running인데 진행 중 워커가 없음 → 끝났으면 review/merged, 멈췄으면 재투입
@@ -90,6 +92,80 @@ def kit_id_of(title, ids):
     return m.group(1) if m and m.group(1) in ids else None
 
 
+SLOT_LONG_MIN = 10   # 이보다 오래 기다리면 '슬롯 줄'을 정지 점검에 올린다
+
+
+def _alive(pid):
+    try:
+        os.kill(int(pid), 0)
+    except (ValueError, ProcessLookupError):
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def slot_state(repo, cfg):
+    """slot.sh 줄 → {이름: {n, holders[], waiters[]}}. 각 항목 {since, pid, worktree, cmd, slot}. 죽은 프로세스의 표시는 뺀다."""
+    d = kitlib.slots_dir(repo)
+    if not d or not d.is_dir():
+        return {}
+    out = {}
+    for f in sorted(d.iterdir()):
+        m = re.match(r"(.+)\.(?:(\d+)\.holder|wait\.(\d+))$", f.name)
+        if not m:
+            continue
+        try:
+            ts, pid, wt, cmd = (f.read_text(encoding="utf-8").rstrip("\n").split("\t", 3) + ["", "", "", ""])[:4]
+            ent = {"since": float(ts), "pid": int(pid), "worktree": wt, "cmd": cmd, "slot": int(m.group(2)) if m.group(2) else None}
+        except (OSError, ValueError):
+            continue
+        if not _alive(ent["pid"]):
+            continue
+        name = m.group(1)
+        g = out.setdefault(name, {"n": 1, "holders": [], "waiters": []})
+        (g["holders"] if m.group(2) else g["waiters"]).append(ent)
+    for name, g in out.items():
+        env = os.environ.get("KIT_SLOTS_" + re.sub(r"[^A-Za-z0-9_]", "_", name))
+        try:
+            g["n"] = max(1, int(env or kitlib.cfg_get(cfg, f"slots.{name}", 1) or 1))
+        except (TypeError, ValueError):
+            g["n"] = 1
+        g["waiters"].sort(key=lambda e: e["since"])
+    return out
+
+
+def _same_tree(a, b):
+    try:
+        return bool(a and b) and Path(a).resolve() == Path(b).resolve()
+    except OSError:
+        return False
+
+
+def slot_lines(s):
+    """정지 점검의 '슬롯 줄' — 대기가 슬롯 수 이상이거나 오래 기다리는 이름마다 한 줄."""
+    lines, now = [], time.time()
+    for name, g in sorted((s.get("slots") or {}).items()):
+        ws = g["waiters"]
+        if not ws:
+            continue
+        longest = (now - ws[0]["since"]) / 60
+        if len(ws) < g["n"] and longest < SLOT_LONG_MIN:
+            continue
+        held = ", ".join(f"{h.get('who') or Path(h['worktree']).name} {int((now - h['since']) // 60)}분" for h in g["holders"]) or "?"
+        ln = f"슬롯 줄 '{name}': 사용 {len(g['holders'])}/{g['n']} ({held}) · 대기 {len(ws)} · 최장 {int(longest)}분"
+        sp = s.get("machine") or {}
+        if name == "test" and sp.get("suggest", 0) > g["n"]:
+            ln += (f" → 이 기계(코어 {sp.get('cores')}·메모리 {sp.get('mem_gib')} GiB) 기준 제안 {sp['suggest']}: "
+                   f"kit.yaml slots.test: {sp['suggest']} (시험 하나의 메모리를 재 보고 정한다)")
+        else:
+            ln += " → 앞 실행이 멈췄는지 worker-read로 본다(슬롯을 늘릴 여유가 없으면 그대로 둔다)"
+        lines.append(ln)
+    return lines
+
+
 def collect(repo, cfg, a):
     data, tasks = kitlib.all_tasks(repo, cfg)
     active_ids = [str(t["id"]) for t in data.get("tasks") or [] if isinstance(t, dict) and t.get("id") is not None]
@@ -117,6 +193,13 @@ def collect(repo, cfg, a):
         out["scope_flags"] = scope_flags(repo, cfg, tasks)
     except Exception:  # noqa: BLE001 — 현황은 기록이 깨져도 나와야 한다
         out["scope_flags"] = []
+    try:
+        out["slots"] = slot_state(repo, cfg)
+        if out["slots"]:
+            c, mg = kitlib.machine_spec()
+            out["machine"] = {"cores": c, "mem_gib": round(mg) if mg else None, "suggest": kitlib.suggest_slots(c, mg)}
+    except Exception:  # noqa: BLE001
+        out["slots"] = {}
     if a.no_orca:
         return out
     o = {"mail": {}, "workers": [], "settled": {}, "error": None}
@@ -152,6 +235,13 @@ def collect(repo, cfg, a):
             o["workers"].append({"dispatch": w.get("dispatchId"), "title": title, "kit_id": kit_id_of(title, idset),
                                  "state": state, "liveness": w.get("liveness"), "attention": w.get("attention") or [],
                                  "workspace": wsp, "last_commit": last_commit(wsp) if wsp and Path(wsp).is_dir() else None})
+    for w in o["workers"]:
+        for name, g in (out.get("slots") or {}).items():
+            for e in g["holders"] + g["waiters"]:
+                if _same_tree(e["worktree"], w["workspace"]):
+                    e["who"] = w["kit_id"] or w["title"] or w["dispatch"]
+                    w["slot_hold" if e["slot"] else "slot_wait"] = dict(e, name=name, n=g["n"], used=len(g["holders"]),
+                                                                         pos=None if e["slot"] else g["waiters"].index(e) + 1)
     out["orca"] = o
     # 모델 라우팅: 진행 중 워커의 구독·모델, 구독별 동시 상한, 쿨다운
     try:
@@ -397,7 +487,7 @@ def scope_lines(s):
 def stall_lines(s, stale_min):
     o = s.get("orca")
     if o is None:
-        return scope_lines(s) + ["(Orca 조회 안 함: --no-orca)"]
+        return scope_lines(s) + slot_lines(s) + ["(Orca 조회 안 함: --no-orca)"]
     lines = scope_lines(s)
     now = time.time()
     qs = {q["dispatch"]: q for q in s.get("quota_stalls") or []}
@@ -422,9 +512,14 @@ def stall_lines(s, stale_min):
                             else "python3 orchestration/tools/quota_switch.py (자동 전환, 곧 풀리면 대기)"))
         elif w["attention"]:
             lines.append(f"attention {who}: {', '.join(map(str, w['attention']))} → worker-show/worker-read")
+        elif w.get("slot_wait"):
+            sw_ = w["slot_wait"]
+            lines.append(f"슬롯 대기 {who}: '{sw_['name']}' {int((now - sw_['since']) // 60)}분째 · {sw_['pos']}번째 · "
+                         f"사용 중 {sw_['used']}/{sw_['n']} → 차례를 기다리는 중(멈춘 것 아님)")
         elif w["last_commit"] and now - max(w["last_commit"], w.get("started") or 0) > stale_min * 60:
             lines.append(f"커밋 없음 {who}: 마지막 커밋 {ago(w['last_commit'])}"
                          + (f" · 투입 {ago(w['started'])}" if w.get("started") else "") + " → worker-read로 화면 끝 확인")
+    lines += slot_lines(s)
     sw = s.get("sweep") or {}
     if sw.get("safe"):
         lines.append(f"워크트리 정리 {len(sw['safe'])}개 ({', '.join(sw['safe'][:5])}{' …' if len(sw['safe']) > 5 else ''}) → "
@@ -480,7 +575,9 @@ def print_report(s, a):
         for w in o["workers"]:
             att = f" · attention {', '.join(map(str, w['attention']))}" if w["attention"] else ""
             mdl = f" · {w['model']}" if w.get("model") else ""
-            print(f"- {w['kit_id'] or w['title'] or '?'} {w['dispatch']} {w['state']}/{w['liveness']}{mdl} · 마지막 커밋 {ago(w['last_commit'])}{att}")
+            sl = (f" · 슬롯 대기 '{w['slot_wait']['name']}' {int((time.time() - w['slot_wait']['since']) // 60)}분째" if w.get("slot_wait")
+                  else f" · 슬롯 '{w['slot_hold']['name']}' 사용 중 {int((time.time() - w['slot_hold']['since']) // 60)}분" if w.get("slot_hold") else "")
+            print(f"- {w['kit_id'] or w['title'] or '?'} {w['dispatch']} {w['state']}/{w['liveness']}{mdl} · 마지막 커밋 {ago(w['last_commit'])}{sl}{att}")
         md = s.get("models") or {}
         if md.get("error"):
             print(f"## 모델: 라우팅 설정 오류 ({md['error']})")
@@ -490,6 +587,10 @@ def print_report(s, a):
             cd = [f"{k} {int((v['until'] - time.time()) // 60)}분" for k, v in md["cooldowns"].items()]
             print("## 모델: 진행 " + (" · ".join(parts) or "0") + (f" · 쿨다운 {', '.join(cd)}" if cd else "")
                   + ("" if md.get("enabled") else " (자동 라우팅 꺼짐)"))
+    for name, g in sorted((s.get("slots") or {}).items()):
+        ws = g["waiters"]
+        print(f"## 슬롯 '{name}': 사용 {len(g['holders'])}/{g['n']} · 대기 {len(ws)}"
+              + (f" (최장 {int((time.time() - ws[0]['since']) // 60)}분)" if ws else ""))
     print("## 정지 점검")
     for ln in stall_lines(s, a.stale_min):
         print(f"- {ln}")

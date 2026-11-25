@@ -3,6 +3,7 @@
 표준 라이브러리 + PyYAML만 쓴다. 설치 위치는 <저장소>/orchestration/tools/ 이다.
 """
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -17,7 +18,6 @@ CONFIG_REL = "orchestration/kit.yaml"
 ARCHIVE_REL = "orchestration/tasks.archive.yaml"
 STATUSES = ["todo", "ready", "running", "review", "merged"]
 LAYERS = ["L0", "L1", "L2"]
-# Orca worker-list의 state 중 '끝난' 것. 나머지(running 등)는 진행 중으로 본다.
 def workspace_path(v):
     """Orca 워커의 workspace 값 → 파일 시스템 경로. Orca는 '<워크스페이스 ID>::<경로>'로 준다(경로만 오기도 한다).
     Windows 경로의 'C:'는 '::'가 아니라서 그대로 남는다."""
@@ -63,6 +63,44 @@ def msg_payload(m):
     return pl if isinstance(pl, dict) else {}
 
 
+def machine_spec():
+    """(코어 수, 메모리 GiB) — 모르는 값은 None."""
+    mem = None
+    try:
+        with open("/proc/meminfo", encoding="utf-8") as f:
+            for ln in f:
+                if ln.startswith("MemTotal:"):
+                    mem = int(ln.split()[1]) / 1048576
+                    break
+    except (OSError, ValueError):
+        try:
+            out = subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True, timeout=5)
+            mem = int(out.stdout.strip()) / 2 ** 30 if out.returncode == 0 else None
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            mem = None
+    return os.cpu_count(), mem
+
+
+def suggest_slots(cores=None, mem=None):
+    """전체 시험 동시 수 제안: 코어 4개·메모리 8 GiB당 하나(1~8). 시험 하나가 코어 서너 개·메모리 수 GiB를 쓴다고 본 보수적 값."""
+    if cores is None and mem is None:
+        cores, mem = machine_spec()
+    return max(1, min(int((cores or 4) // 4), int((mem or 8) // 8), 8))
+
+
+def slots_dir(repo):
+    """slot.sh 잠금 폴더(<공용 git 디렉터리>/orca-kit/slots). git이 아니면 None."""
+    try:
+        out = subprocess.run(["git", "-C", str(repo), "rev-parse", "--git-common-dir"], capture_output=True, text=True, timeout=10)
+    except OSError:
+        return None
+    if out.returncode != 0 or not out.stdout.strip():
+        return None
+    gd = Path(out.stdout.strip())
+    return (gd if gd.is_absolute() else Path(repo) / gd).resolve() / "orca-kit" / "slots"
+
+
+# Orca worker-list의 state 중 '끝난' 것. 나머지(running 등)는 진행 중으로 본다.
 SETTLED_WORKER_STATES = {"succeeded", "failed", "abandoned", "stopped", "cancelled", "canceled"}
 
 
