@@ -681,6 +681,61 @@ def w(n):
 ts=[threading.Thread(target=w,args=(x,)) for x in 'ab']; [t.start() for t in ts]; [t.join() for t in ts]
 assert order[1].endswith('-') and order[3].endswith('-'), order\" && grep -q 'orchestration/state/.\*.lock' .gitignore"
 unset FAKE_PG_LOG FAKE_PG_WS
+# 워크트리 정리(worktree_sweep): 잃을 것이 없을 때만 지운다 — merged·변경 없음·진행 중 디스패치 없음·오래 쉼·고정 안 됨
+cat >> orchestration/tasks.yaml <<'YAML'
+- {id: X-WA, title: 정리 A, layer: L2, module: api, branch: req/X-WA, base: int/api, deps: [], write_scope: [api/wa/], acceptance: "a", guarantees: ["a"], status: merged}
+- {id: X-WB, title: 정리 B, layer: L2, module: api, branch: req/X-WB, base: int/api, deps: [], write_scope: [api/wb/], acceptance: "b", guarantees: ["b"], status: merged}
+- {id: X-WC, title: 정리 C, layer: L2, module: api, branch: req/X-WC, base: int/api, deps: [], write_scope: [api/wc/], acceptance: "c", guarantees: ["c"], status: running}
+- {id: X-WF, title: 정리 F, layer: L2, module: api, branch: req/X-WF, base: int/api, deps: [], write_scope: [api/wf/], acceptance: "f", guarantees: ["f"], status: merged}
+- {id: X-WM, title: 정리 M, layer: L2, module: api, branch: req/X-WM, base: int/api, deps: [], write_scope: [api/wm/], acceptance: "m", guarantees: ["m"], status: merged}
+YAML
+mkdir -p docs/06_evidence/X-WA-RV && echo r > docs/06_evidence/X-WA-RV/report.md
+git add -A >/dev/null && git commit -qm "[L0] 정리 시험" && git branch -f int/api HEAD
+SWP="$W/swp"; mkdir -p "$SWP"
+for x in a b c d f m; do git worktree add -q -b "req/X-W${x^^}" "$SWP/x-w$x" int/api; done
+git worktree add -q -b req/X-WA-RV "$SWP/x-wa-rv" main
+git worktree add -q -b scratch-e "$SWP/scratch-e" main
+echo dirty > "$SWP/x-wb/new.txt"
+echo extra > "$SWP/x-wm/m.txt"; git -C "$SWP/x-wm" add -A; git -C "$SWP/x-wm" commit -qm "[X-WM] 머지 안 된 커밋"
+cat > "$W/fake-orca-swp.py" <<'PY'
+import json, os, sys, time
+a = " ".join(sys.argv[1:]); open(os.environ["FAKE_SWP_LOG"], "a").write(a + "\n")
+def out(o): print(json.dumps(o, indent=2)); sys.exit(0)
+P, now = os.environ["FAKE_SWP"], time.time() * 1000
+old = now - 5 * 3600 * 1000
+def wt(n, **k): return dict({"path": f"{P}/{n}", "branch": "", "isMainWorktree": False, "isPinned": False, "childWorktreeIds": [], "lastActivityAt": old}, **k)
+if a.startswith("worktree list"):
+    out({"ok": True, "result": {"worktrees": [wt("x-wa"), wt("x-wb"), wt("x-wc"), wt("x-wd", isPinned=True), wt("x-wf", lastActivityAt=now - 60000),
+                                              wt("x-wm"), wt("x-wa-rv", branch="refs/heads/req/X-WA-RV"), wt("scratch-e", branch="refs/heads/scratch-e"),
+                                              {"path": os.environ["FAKE_SWP_MAIN"], "isMainWorktree": True}]}})
+if "worker-list" in a:
+    out({"ok": True, "result": {"workers": [
+        {"dispatchId": "ctx_wa1", "state": "succeeded", "terminalState": "open", "workspace": "ws::" + P + "/x-wa"},
+        {"dispatchId": "ctx_wc1", "state": "running", "terminalState": "open", "workspace": "ws::" + P + "/x-wc"}]}})
+if a.startswith("worktree rm") or "worker-release" in a: out({"ok": True, "result": {}})
+if "task-list" in a or "inbox" in a: out({"ok": True, "result": {"tasks": [], "messages": []}})
+print('{"ok":false}'); sys.exit(1)
+PY
+printf '#!/bin/sh\nexec python3 %s "$@"\n' "$W/fake-orca-swp.py" > "$W/fake-orca-swp"; chmod +x "$W/fake-orca-swp"
+cp orchestration/kit.yaml "$W/kit.yaml.pre-swp"; sed -i 's/^  work_run: .*/  work_run: "run_swp"/' orchestration/kit.yaml
+export FAKE_SWP="$SWP" FAKE_SWP_LOG="$W/swp.log" FAKE_SWP_MAIN="$PWD"; : > "$W/swp.log"
+WS="env ORCA_CLI_COMMAND=$W/fake-orca-swp"
+o=$($WS python3 $T/worktree_sweep.py 2>&1)
+check "정리 판정: merged·변경 없음 → 정리 · 검토 보고서가 main에 → 정리" bash -c 'grep -q "^- x-wa \[X-WA·new\]: 작업 X-WA merged" <<<"$0" && grep -q "^- x-wa-rv \[X-WA·review\]: 검토 보고서가 main에 들어왔다" <<<"$0"' "$o"
+check "남겨 둠: 진행 중 디스패치 · 고정 · 최근 활동 · 확인 필요: merged인데 변경/머지 안 된 커밋 · 주인 없음(main에 있음)" bash -c 'grep -q "^- x-wc.*진행 중인 디스패치" <<<"$0" && grep -q "^- x-wd.*사용자가 고정함" <<<"$0" && grep -q "^- x-wf.*최근 활동" <<<"$0" && grep -q "^- x-wb.*커밋하지 않은 변경 1개" <<<"$0" && grep -q "^- x-wm.*merged인데 이 워크트리에 기준에 없는 커밋 1개" <<<"$0" && grep -q "^- scratch-e: 어느 작업 것인지 모른다 — HEAD가 main에 들어 있어 --orphans" <<<"$0"' "$o"
+check "미리 보기는 아무것도 지우지 않는다" bash -c '! grep -q "worktree rm" "$0"' "$W/swp.log"
+o=$($WS python3 $T/worktree_sweep.py --apply 2>&1)
+check "--apply: '정리'만 지운다(끝난 워커 터미널 해제 → worktree rm --delete-branch), 주인 없는 것은 안 지움" bash -c 'l=$(cat "$1"); grep -q "worker-release --dispatch ctx_wa1" <<<"$l" && grep -q "worktree rm --worktree path:$2/x-wa --delete-branch" <<<"$l" && grep -q "worktree rm --worktree path:$2/x-wa-rv --delete-branch" <<<"$l" && ! grep -q "path:$2/\(x-wb\|x-wc\|x-wd\|x-wf\|x-wm\|scratch-e\) " <<<"$l" && grep -q "정리함 2" <<<"$0" && grep -q "x-wa	X-WA" orchestration/state/sweep.log' "$o" "$W/swp.log" "$SWP"
+: > "$W/swp.log"
+o=$($WS python3 $T/worktree_sweep.py --apply --orphans 2>&1)
+check "--orphans: 주인 없지만 main에 다 들어 있는 것도" bash -c 'grep -q "worktree rm --worktree path:$1/scratch-e" "$0"' "$W/swp.log" "$SWP"
+o=$($WS python3 $T/status.py --stall 2>&1)
+check "정지 점검: 워크트리 정리·확인 필요 줄" bash -c 'grep -q "워크트리 정리 .*→ python3 orchestration/tools/worktree_sweep.py --apply" <<<"$0" && grep -q "워크트리 확인 필요 .*개" <<<"$0"' "$o"
+check "launch 자동 정리는 한 시간에 한 번(sweep_due) · cleanup.auto_sweep: false면 안 함" python3 -c "
+import sys,json,time; sys.path.insert(0,'$T'); import worktree_sweep as w, kitlib
+cfg=kitlib.load_config('.'); assert not w.sweep_due('.',cfg)
+cfg['cleanup']={'auto_sweep': False}; assert not w.sweep_due('.',cfg)"
+cp "$W/kit.yaml.pre-swp" orchestration/kit.yaml; unset FAKE_SWP FAKE_SWP_LOG FAKE_SWP_MAIN
 # 공개 벤치마크 → 품질: Terminal-Bench 페이지(이스케이프된 리더보드 JSON)에서 카탈로그에 맞는 줄만, 다른 CLI 점수는 빌리지 않는다
 python3 - "$W/tb.html" <<'PY'
 import json, sys

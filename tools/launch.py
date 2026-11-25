@@ -39,6 +39,7 @@ import routing  # noqa: E402
 import status  # noqa: E402
 import task_status  # noqa: E402
 import validate_dag  # noqa: E402
+import worktree_sweep  # noqa: E402
 
 NEW_WT = ("new-top-level", "new-child")
 
@@ -160,6 +161,14 @@ def main(argv=None):
             if r.get("status") in ("갱신", "실패"):
                 print(f"  {ag}: {r['status']} {r.get('before', '')}" + (f" → {r['after']}" if r.get("status") == "갱신" else f" ({r.get('detail')})"))
         routing.discover(repo, catalog0, refresh=True)
+    # ── 끝난 워커 워크트리 정리 (kit.yaml cleanup.auto_sweep, 기본 true): 한 시간에 한 번, 잃을 것이 없는 것만
+    if not a.dry_run and not os.environ.get("KIT_NO_SWEEP") and worktree_sweep.sweep_due(repo, cfg):
+        r_, e_ = worktree_sweep.sweep(repo, cfg, apply=True)
+        if r_ and r_[1]:
+            ok_ = [i["name"] for i, k, _ in r_[1] if k]
+            print(f"워크트리 정리: {len(ok_)}개 ({', '.join(ok_[:6])}{' …' if len(ok_) > 6 else ''}) — 끄려면 kit.yaml cleanup.auto_sweep: false")
+        if r_ and any(v == worktree_sweep.CHECK for v, _, _ in r_[0]):
+            print(f"워크트리 확인 필요 {sum(1 for v, _, _ in r_[0] if v == worktree_sweep.CHECK)}개 → python3 orchestration/tools/worktree_sweep.py")
     for tid in a.ids:
         t = tasks.get(tid)
         print(f"\n[{tid}]")

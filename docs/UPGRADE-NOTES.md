@@ -6,14 +6,15 @@
 적용 절차는 `skills/orca-orchestration-kit/references/upgrade.md`(적용 직전·끝에 매니저에게 알리고, 키트가 바꾼 경로만 커밋).
 아래는 매니저가 **한 번만 다시 익히면 되게** 묶음마다 바뀐 운영을 모은 것이다.
 
-## 다음 묶음: v0.8.4 → v0.9.1 (v0.8.5 + v0.9.0 + v0.9.1)
+## 다음 묶음: v0.8.4 → v0.10.0 (v0.8.5 · v0.9.0 · v0.9.1 · v0.10.0)
 
 ### 매니저가 새로 할 일
 1. **투입 전에 약속을 닫는다.** L1·L2 작업에 `guarantees`(보장하는 것)와 `out_of_scope`(범위 밖)를 적고 낸다. `validate_dag.py`가 빠진 작업과 '언제나·모든·완전히' 같은 열린 약속을 경고한다. 이미 돌고 있는 작업은 다음 차수(보완·이어받기)를 낼 때 적는다.
 2. **검토 판정에 계열을 남긴다.** `models.py feedback <ID> major|fail --category <계열>`(같은 구조적 원인이면 같은 이름). 정지 점검에 '범위 결정 필요'가 나오면 보완을 한 번 더 내지 말고 범위 선택지를 마스터에 올리고 작업에 `hold`.
 3. **핵심 약속 점검표를 채운다.** 적용하면 `orchestration/checklist.md`가 새로 생긴다(예시 줄만 있음). 지금까지 검토가 되풀이해 잡은 지적(영역 분리, CLI 차단, 승인 무결성 등)을 '## 항목'에 한 줄씩 넣는다. 다음 구현·보완 명세부터 붙는다.
 4. **pre-push 훅을 다시 깐다**: `orchestration/tools/install_hooks.sh`(훅은 복사본이라 upgrade만으로는 안 바뀐다). 새 훅은 kit.yaml·PyYAML을 못 읽으면 push를 막는다(v0.9.1).
-5. **기록 커밋은 경로를 지정해 담는다**(`git add -- <파일>`, `git add -A`·`orchestration/` 통째 금지). 키트 적용 중 커밋 섞임(v0.8.5, L-21).
+5. **워크트리를 정리한다(v0.10.0).** 적용 뒤 `python3 orchestration/tools/worktree_sweep.py`로 미리 보고 `--apply`. 그다음부터 launch.sh가 한 시간에 한 번 '정리'(merged·변경 없음·진행 중 없음)만 저절로 지운다. '확인 필요'(커밋하지 않은 변경, 머지 안 된 커밋, 주인 없음)는 이정표마다 목록을 보고 닫는다. 끄려면 kit.yaml `cleanup.auto_sweep: false`.
+6. **기록 커밋은 경로를 지정해 담는다**(`git add -- <파일>`, `git add -A`·`orchestration/` 통째 금지). 키트 적용 중 커밋 섞임(v0.8.5, L-21).
 
 ### 저절로 바뀌는 것
 - escalation 메일을 `--full`로 읽어 필터 중단(codex 안전 필터)을 메일 Last output에서 잡는다. 한도 메일(quota reached·Resets in)은 필터·오류 중단으로 잡지 않는다(v0.8.5).

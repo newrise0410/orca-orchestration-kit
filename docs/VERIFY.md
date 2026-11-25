@@ -258,3 +258,7 @@ v0.4.1(10장)에서 snap 설치본은 작업 폴더 신뢰 확인 창에 막혔�
 - 시험 165/165(이전 157 + 8): 이메일 도메인(example.com·하위 도메인 통과, notexample.com 걸림), pre-push(설정 못 읽으면 막고 이유 출력, `KIT_HOOK_NO_CONFIG_OK=1`이면 통과), cleanup(둘째 쪽 워커 목록의 진행 중 디스패치로 보류, `--cursor` 호출), launch(JSON `result.task.id`로 Task ID — 출력 속 다른 `task_…` 문자열에 속지 않음, worker-start 실패면 `task-update --status failed --result cancelled`), 쓰기 잠금(두 스레드가 차례로, 잠금 파일은 .gitignore), quota_watch 안전장치(실행 기록에 completed가 있으면 `automations edit --disabled`와 매니저 알림, 사전 확인은 그래도 1).
 - 시험이 잡은 시험 결함: pre-push 시험이 상대 경로로 훅을 불러 `cd` 뒤 파일을 못 찾았고, '막는다' 시험은 그 오류(종료코드 2)로 잘못 통과하고 있었다. 절대 경로로 부르고 막은 이유 문구까지 확인한다.
 
+## 25. v0.10.0: 워크트리 정리 (2026-11-25)
+- 시험 172/172(이전 165 + 7): 실제 git 워크트리 8개와 가짜 Orca로 판정 — merged·깨끗함 → 정리, 검토 보고서가 main에 → 정리, 진행 중 디스패치·고정·최근 활동 → 남겨 둠, merged인데 커밋하지 않은 변경·머지 안 된 커밋 → 확인 필요, 주인 없음(main에 있음) → 확인 필요(`--orphans`). 미리 보기는 지우지 않고, `--apply`는 정리만(끝난 워커 터미널 해제 → `worktree rm --delete-branch`, sweep.log 기록), `--orphans`는 주인 없는 것까지. 정지 점검 줄, launch 자동 정리 주기·끄기.
+- 실데이터 미리 보기(지우지 않음): kit.yaml이 없는 실사용 저장소(메인 master)의 워커 워크트리 59개 → 정리 13, 확인 필요 36(주인 없음이지만 master에 다 있음 20 — `--orphans`로 정리 가능, 주인 없음 + master에 없는 커밋 15, merged인데 변경 남음 1), 남겨 둠 10. 처음엔 메인을 'main'으로만 찾아 거의 전부 '확인 필요'였다 → 설정이 없거나 그 브랜치가 없으면 메인 워크트리의 현재 브랜치를 쓴다.
+
