@@ -160,15 +160,27 @@ def decide(repo, cfg, tasks, catalog, pol, q, quota, live):
         left = max(0, int((q["resets"] - time.time()) // 60))
         return "대기", f"{win} · {routing._hm(q['resets'])}에 풀린다({left}분 뒤, 기준 {qc.get('wait_minutes', 30)}분)", None, False
     review = q["mode"] == "review"
-    dec = routing.route(repo, cfg, tid, tasks, "review" if review else "handoff", live_dids=live, catalog=catalog, pol=pol, quota=quota)
-    if not dec.get("key"):
-        why = "다른 구독도 한도" if dec.get("quota_blocked") else "다른 후보 없음"
-        return "대기", f"{win} · {why} ({routing.describe(dec)[:160]})", dec, review
-    if review and routing.rcfg(pol, "cross_review", True):
+    # 넘겨받을 구독은 앞 워커가 풀릴 때까지(최대 switch_need_minutes) 버텨야 한다 — 곧 다시 찰 구독으로 넘기면 또 멈춘다
+    left = (q["resets"] - time.time()) / 60 if q["resets"] else float(qc.get("switch_need_minutes", 120))
+    need = min(float(qc.get("switch_need_minutes", 120)), max(left, 0))
+    impl = set()
+    if review and routing.rcfg(pol, "cross_review", True):   # 검토 독립성: 이 작업의 코드를 쓴 구독(이어받기 앞뒤 모두)은 아예 뺀다
         impl = {r["agent"] for r in routing.read_dispatch(repo, set(tasks))
                 if r["kit_id"] == tid and r["mode"] in ("new", "retry", "handoff") and r["agent"]}
-        if dec["agent"] in impl:
-            return "대기", f"{win} · 검토 독립성: 남은 후보({dec['key']})가 구현한 구독({dec['agent']})이다", dec, review
+    dec = routing.route(repo, cfg, tid, tasks, "review" if review else "handoff", live_dids=live, catalog=catalog, pol=pol, quota=quota,
+                        need_minutes=need, exclude_agents=impl)
+    if not dec.get("key"):
+        ex = dec.get("excluded", {}).values()
+        tight = sorted({v for v in ex if v.startswith("넘겨받기엔 빠듯")})
+        indep = any(v.startswith("검토 독립성") for v in ex)
+        if tight:
+            why = "넘겨받을 구독도 곧 다시 찬다: " + "; ".join(tight)[:200]
+        elif indep:
+            others = sorted({f"{k.split('-')[0]}: {v[:60]}" for k, v in dec.get("excluded", {}).items() if not v.startswith("검토 독립성")})
+            why = f"검토 독립성: 구현한 구독({', '.join(sorted(impl))}) 밖에 넘겨받을 후보가 없다" + (f" (나머지: {'; '.join(others)[:240]})" if others else "")
+        else:
+            why = "다른 구독도 한도" if dec.get("quota_blocked") else "다른 후보 없음"
+        return "대기", f"{win} · {why}", dec, review
     return "전환", f"{win} → {routing.describe(dec)}", dec, review
 
 
@@ -270,8 +282,11 @@ def main(argv=None):
         with open(routing.state_dir(repo) / "quota_switch.tsv", "a", encoding="utf-8") as f:
             f.write("\t".join([dt.datetime.now().strftime("%F %T"), tid, q["dispatch"], q["agent"], q["key"], reason,
                                snap["branch"], suffix]) + "\n")
+        # 고른 구독을 그대로 넘긴다(kit.yaml review.agent 같은 고정이 한도 찬 구독을 다시 고르지 않게)
+        pick = ["--agent", dec["agent"]] + (["--model", str(dec["model"])] if dec.get("model") else []) \
+            + (["--effort", str(dec["effort"])] if dec.get("effort") else [])
         cmd = [sys.executable, str(TOOLS / "launch.py"), "--handoff", str(notes), "--suffix", suffix, "--worktree", f"path:{ws}"] \
-            + (["--review"] if review else []) + [tid]
+            + pick + (["--review"] if review else []) + [tid]
         p = subprocess.run(cmd, capture_output=True, text=True)
         for ln in (p.stdout + p.stderr).strip().splitlines():
             print("  " + ln)
