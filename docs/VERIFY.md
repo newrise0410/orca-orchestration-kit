@@ -182,3 +182,19 @@ kit.py bootstrap --target <tmp>/empty --dry-run
 | Terminal-Bench 4.1 실데이터 | 리더보드 67줄 중 카탈로그에 맞는 36줄. 품질(5 × 해결률/최고): fable·opus 5.0, sonnet 4.9, carbon 4.9, astra·sol·neon 4.7, terra 4.1, haiku 3.0, grok 2.9, luna 1.2. agy-claude-opus는 벤치 없음(카탈로그 4) |
 | 잔여 한도 실데이터 | Orca rateLimits: claude 주간 30%·Fable 주간 26%, codex 세션 100%(초기화 시각까지 제외, 다른 계정 여유 알림)·주간 48%, antigravity Gemini 묶음 세션 90%·주간 38%(벌점 −2.7), Claude and GPT 묶음 0%, grok 주간 0%. 캐시 파일에 이메일 없음 확인 |
 | 실제 결정 | 데모 F-01(계약·임계 경로) → claude-sonnet high, S-01(체계 통합) → claude-opus high. codex는 세션 소진으로 제외 |
+
+## 16. v0.7.0 실기동: Antigravity 공식 설치본 워커 (2026-11-25)
+v0.4.1(10장)에서 snap 설치본은 작업 폴더 신뢰 확인 창에 막혔고, 시작한 뒤에도 Orca CLI 심을 실행하지 못해 `worker_done`을 보내지 못했다. snap 판을 지우고 공식 설치본으로 바꾼 뒤 같은 시험을 다시 했다.
+
+| 항목 | 결과 |
+|---|---|
+| 명령 | `worker-start --environment local --worktree current --agent antigravity --model claude-opus-5-5-low` (읽기 전용 확인 작업) |
+| 시작 | 확인 창 없이 바로 `ready` (신뢰 목록 손대지 않음) |
+| 실행 파일 | 워커가 보고: `readlink -f "$(command -v agy)"` → `~/.local/bin/agy`, `agy --version` → 1.5.16 |
+| 모델 | 워커가 보고: Claude Opus 5.5 · low. Orca가 카탈로그 모델 ID를 그대로 넘겼다 |
+| `worker_done` | 도착(outcome `succeeded`). 워커는 끝난 뒤 스스로 닫혔다 |
+| 저장소 변경 | 없음 |
+
+- 시험한 한도 묶음은 Antigravity의 "Claude and GPT models"(그때 0%)다. Gemini Neon·Carbon은 같은 실행 파일이고 모델 ID만 다르지만 직접 띄우지는 않았다(Gemini 묶음 세션 90%라 아꼈다).
+- 결론: 공식 설치본 Antigravity는 Orca 워커로 쓸 수 있고, 라우팅 후보에 들어간다. snap 설치본은 계속 자동으로 뺀다.
+
