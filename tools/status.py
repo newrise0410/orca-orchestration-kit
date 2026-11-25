@@ -125,7 +125,7 @@ def collect(repo, cfg, a):
                 o["settled"][state] = o["settled"].get(state, 0) + 1
                 continue
             title = titles.get(w.get("taskId")) or ""
-            wsp = w.get("workspace") or ""
+            wsp = kitlib.workspace_path(w.get("workspace"))
             o["workers"].append({"dispatch": w.get("dispatchId"), "title": title, "kit_id": kit_id_of(title, idset),
                                  "state": state, "liveness": w.get("liveness"), "attention": w.get("attention") or [],
                                  "workspace": wsp, "last_commit": last_commit(wsp) if wsp and Path(wsp).is_dir() else None})

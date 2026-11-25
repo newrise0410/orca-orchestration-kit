@@ -28,14 +28,15 @@ act=$(printf '%s' "$wl" | python3 -c "
 import json,sys
 ws=json.load(sys.stdin).get('result',{}).get('workers',[])
 done={'succeeded','failed','abandoned','stopped','cancelled','canceled'}
-print(' '.join(w['dispatchId'] for w in ws if str(w.get('workspace','')).endswith('/$n') and w.get('state') not in done))")
+wp=lambda w: str(w.get('workspace') or '').split('::',1)[-1].rstrip('/')
+print(' '.join(w['dispatchId'] for w in ws if wp(w).endswith('/$n') and w.get('state') not in done))")
 [ -z "$act" ] || { echo "보류 $n: 끝나지 않은 디스패치 $act"; exit 1; }
 # 한도 전환 보존 브랜치(wip/<ID>-quota-*): 작업이 상위에 머지됐으니 더는 필요 없다
 id="${rb#req/}"; wips=$(git for-each-ref --format='%(refname:short)' "refs/heads/wip/${id}-quota-*")
 dsps=$(printf '%s' "$wl" | python3 -c "
 import json,sys
 for w in json.load(sys.stdin).get('result',{}).get('workers',[]):
-  if str(w.get('workspace','')).endswith('/$n') and w.get('terminalState')!='released': print(w['dispatchId'])")
+  if str(w.get('workspace') or '').split('::',1)[-1].rstrip('/').endswith('/$n') and w.get('terminalState')!='released': print(w['dispatchId'])")
 if [ $DRY = 1 ]; then
   echo "[dry-run] 조건 충족: $n ($d)"
   for dsp in $dsps; do echo "[dry-run] $ORCA orchestration worker-release --dispatch $dsp"; done

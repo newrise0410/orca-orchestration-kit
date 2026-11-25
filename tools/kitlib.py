@@ -17,6 +17,15 @@ ARCHIVE_REL = "orchestration/tasks.archive.yaml"
 STATUSES = ["todo", "ready", "running", "review", "merged"]
 LAYERS = ["L0", "L1", "L2"]
 # Orca worker-list의 state 중 '끝난' 것. 나머지(running 등)는 진행 중으로 본다.
+def workspace_path(v):
+    """Orca 워커의 workspace 값 → 파일 시스템 경로. Orca는 '<워크스페이스 ID>::<경로>'로 준다(경로만 오기도 한다).
+    Windows 경로의 'C:'는 '::'가 아니라서 그대로 남는다."""
+    if isinstance(v, dict):
+        v = v.get("path") or v.get("worktreePath") or ""
+    v = str(v or "")
+    return v.split("::", 1)[1] if "::" in v else v
+
+
 SETTLED_WORKER_STATES = {"succeeded", "failed", "abandoned", "stopped", "cancelled", "canceled"}
 
 

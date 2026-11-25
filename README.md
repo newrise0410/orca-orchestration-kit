@@ -10,7 +10,7 @@ AI 에이전트 다중 세션으로 소프트웨어를 개발하는 워크플로
 - 단일 HTML 대시보드(오프라인, 작업 보드), 실행 격리 모듈(선택), 검토 단계 모듈(선택)
 - 배포: Claude Code 플러그인 마켓플레이스(자동 업데이트) 또는 심볼릭 링크
 
-버전: **v0.8.1** (2026-11-25) · 라이선스: [Apache-2.0](LICENSE)
+버전: **v0.8.2** (2026-11-25) · 라이선스: [Apache-2.0](LICENSE)
 
 ---
 
@@ -230,6 +230,7 @@ docs/                            VERIFY.md  DESIGN-NOTES.md  LESSONS.md
 
 | 버전 | 일자 | 내용 |
 |---|---|---|
+| v0.8.2 | 2026-11-25 | **결함(현장 보고):** Orca가 워커의 workspace를 `<워크스페이스 ID>::<경로>`로 주는데 키트가 그 값을 그대로 경로로 써서, 한도 전환이 "워커 워크트리를 찾지 못했다"로 보류되고(진행분 보존·이어받기가 안 일어남) 정지 점검이 워커의 마지막 커밋을 못 읽었다('커밋 없음' 판정 누락). `kitlib.workspace_path`가 `::` 뒤를 경로로 풀고 status·quota_switch·cleanup_worker가 같이 쓴다. 시험의 가짜 Orca도 실제 꼴로 바꿨다 |
 | v0.8.1 | 2026-11-25 | **한도 전환이 곧 다시 찰 구독으로 넘기지 않는다**(현장 피드백: 독립 검토 구독이 둘뿐인 구성에서 전환이 대부분 대기로 끝나 매니저가 기본값을 wait로 바꿨다). 넘겨받을 후보는 창마다 `switch_min_headroom`(30%) 이상 남고, 5시간 창은 지금까지의 소모 속도로 `switch_need_minutes`(120분)·앞 워커가 풀릴 때까지 중 짧은 쪽 안에 다시 차지 않아야 한다. 검토 이어받기는 구현한 구독을 점수 감점이 아니라 후보에서 아예 빼서, 다른 독립 후보가 있으면 그쪽으로 넘긴다(전에는 감점된 구현 구독이 1순위로 남아 대기가 됐다). 고른 구독을 `launch.sh`에 그대로 넘겨 `kit.yaml review.agent` 고정이 한도 찬 구독을 다시 고르던 결함을 고쳤다. 대기 이유에 나머지 후보가 빠진 까닭을 같이 적는다. 기본값은 switch 그대로 |
 | v0.8.0 | 2026-11-25 | **한도 전환**: 정지 점검(`status.py --stall`)이 도는 워커의 구독(그 모델의 창)이 한도 100%면 `한도 정지`로 알린다. `quota_switch.py`가 매니저가 손으로 하던 절차를 한 번에 한다: worker-stop → 진행분(커밋 + 커밋하지 않은 변경)을 임시 브랜치 `wip/<ID>-quota-<시각>`에 스냅샷(작업 브랜치·작업 트리는 그대로) → worker-release → 같은 워크트리에서 `launch.sh --handoff`(새 모드: 이어받기 명세, 작업 항목의 모델 고정은 쓰지 않고 라우팅이 한도 찬 모델을 뺀다). 대기 판정: 설정 `routing.quota.on_exhausted: wait`(기본 switch), 막은 창이 `wait_minutes`(기본 30분) 안에 풀림, 다른 구독도 한도, 검토 워커인데 남은 후보가 구현한 구독뿐(검토 독립성). 멈춘 투입은 실적에서 빼고 handoff는 새 투입처럼 센다. 교차 검토는 이어받기 앞뒤 구독을 모두 피한다. `cleanup_worker.sh`가 머지 뒤 보존 브랜치도 지운다. **대기 뒤 재개**: 대기 판정이면 풀리는 시각을 기록하고, 그 뒤 `quota_switch.py`가 워커에 '이어서 하라'를 보낸다(정지 점검 '한도 풀림'). **예약 점검** `quota_watch.py install`: Orca 예약 실행(10분)의 사전 확인만 써서 할 일이 있으면 매니저 Run에 메일을 보내 깨우고, 사전 확인이 언제나 1로 끝나 에이전트는 띄우지 않는다(구독 소모 없음) |
 | v0.7.0 | 2026-11-25 | **잔여 한도 라우팅**: Orca가 모으는 구독별 사용률(`orca account list --json`의 rateLimits: 5시간 세션·주간·Claude Fable 주간·Antigravity 모델 묶음)을 5분 캐시해 본다. 창 하나라도 98% 이상이면 초기화까지 제외(다른 계정에 여유가 있으면 알림), 세션 70% 넘으면 벌점, 주간이 기간보다 앞서 쓰이면 벌점, 곧 초기화되는데 많이 남으면 가점. 쓸 수 있는 구독이 모두 소진이면 launch.sh가 보류. 대시보드 구독 칩에 사용률. `models.py quota`. **품질 = 공개 벤치마크**: `models.py bench`가 Terminal-Bench 4.1(CLI 에이전트 × 모델 × effort 공식 리더보드)에서 카탈로그에 맞는 줄만 `bench_scores.yaml`에 출처와 함께 남기고, 품질 = 5 × 해결률/최고 해결률. 다른 CLI의 점수는 빌리지 않고, 새 판에 점수가 없으면 바로 아래 판 점수를 쓴다. Artificial Analysis 무료 API는 키(`AA_API_KEY`)가 있을 때만 참고값으로. **동점 규칙**: 점수가 같으면(부동소수 오차 포함) 부하 → 이 대역 실적 → 소모 → 품질 → 키 이름 순으로 가리고 근거에 남긴다(전에는 카탈로그 순서·오차가 갈랐다). 임계 경로 작업의 실적 조회 대역을 기록 대역과 맞췄다. **구독 CLI 자동 업데이트**: `launch.sh`가 하루 한 번(`routing.auto_update: daily`, weekly·off) 워커를 띄우기 전에 각 CLI의 자체 업데이트(`claude/codex/agy/grok update`)를 돌리고 모델 목록을 다시 읽는다. 수동은 `models.py update [--check]`. snap 설치본은 건너뛴다. **카탈로그 계열 따라가기**: `family: gpt-{v}-sol`처럼 적은 항목은 CLI 목록에서 가장 높은 판을 쓴다(effort가 ID에 든 계열은 `{effort}`). `discover`는 계열 옛 판을 알림에서 빼고 새 계열만 알린다. 프로젝트가 `models.yaml`에서 model을 정하면 그 항목은 고정. **카탈로그 정리**: Antigravity는 Gemini 4 Neon·Carbon과 claude-opus-5-5(3.8 Flash 뺌), Grok은 grok-4.7 하나(effort low~high, build-fast 뺌), Codex는 계열로 6.2판을 쓴다. Antigravity는 공식 설치본(`curl -fsSL https://antigravity.google/cli/install.sh \| bash`)을 권한다 |
