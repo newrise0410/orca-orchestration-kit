@@ -24,7 +24,7 @@ version: "2026-11"
 agents:
   claude:      {bin: claude, list: none,  update: [update], bench_agent: 'Claude Code'}   # Claude 구독(Claude Code). 별칭(fable/opus/sonnet/haiku)은 최신 판을 따른다
   codex:       {bin: codex,  list: codex, update: [update], bench_agent: 'Codex'}   # ChatGPT 구독(Codex OAuth)
-  antigravity: {bin: agy,    list: agy,   update: [update], bench_agent: 'Antigravity CLI'}   # Google 구독(Antigravity CLI). 공식 설치본(curl -fsSL https://antigravity.google/cli/install.sh | bash)을 쓴다. snap 설치본은 워커로 못 쓴다(orca CLI 실행 불가). 작업 폴더 신뢰 필요
+  antigravity: {bin: agy,    list: agy,   update: [update], bench_agent: 'Antigravity CLI'}   # Google 구독(Antigravity CLI). 공식 설치본(curl -fsSL https://antigravity.google/cli/install.sh | bash)을 쓴다. Orca 워커로 확인(2026-11-25, docs/VERIFY.md 16장). snap 설치본은 워커로 못 쓴다(orca CLI 실행 불가)
   grok:        {bin: grok,   list: grok,  update: [update], bench_agent: 'Grok Build'}   # xAI 구독(Grok CLI). Orca 설정에서 에이전트를 켜야 한다
 
 models:
