@@ -227,3 +227,9 @@ v0.4.1(10장)에서 snap 설치본은 작업 폴더 신뢰 확인 창에 막혔�
 | 검토 이어받기 | `kit.yaml review.agent: codex`(한도 찬 구독)로 고정해도 고른 구독으로 넘기고, 구현한 구독(codex·grok)은 후보에서 빠진다 |
 | 시험이 잡은 시험 결함 | `update` 시험이 snap PATH로 모델 캐시를 다시 써서 뒤 시험에서 agy가 제외돼 있었다(도구는 맞게 대기했다). 그 시험 뒤에 캐시를 원래 PATH로 되돌린다 |
 
+## 19. v0.8.2: Orca workspace 값 (2026-11-25)
+- 현상(현장 보고): switch로 미리 보기를 돌리면 판정은 "전환"인데 "워커 워크트리를 찾지 못했다"로 보류됐다. 정지 점검도 워커의 마지막 커밋을 읽지 못했다.
+- 원인: Orca `worker-list`의 `workspace`는 `<워크스페이스 ID>::<경로>`다(이 머신에서 실제 값 `7909a5da-…::/home/…/orca-orchestration-kit` 확인). 키트는 그 값을 경로로 썼다. 시험의 가짜 Orca가 경로만 줘서 시험이 잡지 못했다.
+- 수정: `kitlib.workspace_path`(`::` 뒤를 경로로, Windows `C:`는 그대로)를 status·quota_switch·cleanup_worker가 쓴다. 가짜 Orca도 실제 꼴로 준다.
+- 시험 134/134: 값 풀기(ID 붙은 꼴·경로만·Windows 경로·dict), status가 그 꼴에서 경로와 마지막 커밋을 읽음, 한도 전환 전체 흐름이 실제 꼴로 통과.
+

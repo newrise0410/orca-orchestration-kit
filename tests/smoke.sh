@@ -357,7 +357,7 @@ if a.startswith("account list"):
                    **({"session": ok(60, 300, now + 200 * 60 * 1000)} if tight else {})) for p in ("claude", "grok", "antigravity")}}}})
 if "worker-list" in a:
     out({"ok": True, "result": {"workers": [{"dispatchId": os.environ.get("FAKE_SW_DID", "ctx_5a1"), "taskId": "task_5a1", "state": "running",
-                                             "liveness": "alive", "workspace": os.environ["FAKE_SW_WT"]}]}})
+                                             "liveness": "alive", "workspace": "ws-5a1::" + os.environ["FAKE_SW_WT"]}]}})   # Orca 실제 꼴: <워크스페이스 ID>::<경로>
 if "task-list" in a: out({"ok": True, "result": {"tasks": [{"id": "task_5a1", "title": os.environ.get("FAKE_SW_TITLE", "X-SW")}]}})
 if "inbox" in a: out({"ok": True, "result": {"messages": []}})
 if "worker-stop" in a or "worker-release" in a or a.startswith("orchestration send"): out({"ok": True, "result": {}})
@@ -391,6 +391,16 @@ cp orchestration/kit.yaml "$W/kit.yaml.pre-sw"; sed -i 's/^  work_run: .*/  work
 export FAKE_SW_DIR="$W/sw" FAKE_SW_WT="$W/wt-x-sw"
 SW="env ORCA_CLI_COMMAND=$W/fake-orca-sw KIT_NO_CLI_UPDATE=1"
 rm -f orchestration/state/quota_cache.json
+check "workspace 값: <ID>::<경로>·경로만·Windows 경로·dict" python3 -c "
+import sys; sys.path.insert(0,'$T'); import kitlib
+f=kitlib.workspace_path
+assert f('7909a5da-7dd8::/home/u/w') == '/home/u/w' and f('/home/u/w') == '/home/u/w'
+b=chr(92); wp='C:'+b+'Users'+b+'PC'+b+'w'; assert f('5fac85ea::C:/Users/PC/orca/w') == 'C:/Users/PC/orca/w' and f(wp) == wp and f('id::'+wp) == wp
+assert f({'path': '/x'}) == '/x' and f(None) == ''"
+o=$($SW python3 $T/status.py --json 2>/dev/null)
+check "status: Orca workspace(<ID>::<경로>)에서 워커 경로·마지막 커밋을 읽는다" python3 -c "
+import json,sys; d=json.loads(sys.argv[1]); w=d['orca']['workers'][0]
+assert w['workspace']==sys.argv[2] and w['last_commit'], w" "$o" "$W/wt-x-sw"
 o=$($SW python3 $T/status.py --stall 2>&1)
 check "정지 점검: 한도 정지(구독·창·초기화 시각 → quota_switch.py)" bash -c 'grep -q "한도 정지 X-SW (ctx_5a1): codex 세션 100%(.* 초기화) · codex-sol → python3 orchestration/tools/quota_switch.py" <<<"$0"' "$o"
 o=$($SW python3 $T/quota_switch.py --dry-run 2>&1)
