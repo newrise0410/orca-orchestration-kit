@@ -18,6 +18,9 @@
   running 고아 tasks.yaml은 running인데 진행 중 워커가 없음 → 끝났으면 review/merged, 멈췄으면 재투입
   할당 누락    진행 중 워커 0이고 투입 가능 작업이 있음 → launch.sh (일부러 미룬 작업은 tasks.yaml에 hold: <사유>)
   대기할 것 없음 진행 중 0 · 투입 가능 0 · 미답 질문 0 → 다음 작업을 DAG에 넣거나 종료
+  범위 결정 필요 같은 작업에서 같은 차단 계열(models.py feedback --category)이 review.scope_escalate_after(기본 2)회 연속
+              → 한 번 더 고치기 대신 보장/범위 밖을 바꾸는 선택지(축소·기본 차단·범위 밖)를 마스터에 올린다(교훈 L-22)
+  검토 반복   계열이 없거나 달라도 차단이 그보다 한 번 더 연속 → 같은 원인인지 보고 범위 선택지를 검토
 메시지 ID를 같이 출력한다: 질문은 `orca orchestration reply --id <ID> --body ...`로 답한다.
 """
 import argparse
@@ -107,6 +110,10 @@ def collect(repo, cfg, a):
             out["installed_kit"] = json.loads(ip.read_text(encoding="utf-8")).get("kit_version")
         except json.JSONDecodeError:
             pass
+    try:
+        out["scope_flags"] = scope_flags(repo, cfg, tasks)
+    except Exception:  # noqa: BLE001 — 현황은 기록이 깨져도 나와야 한다
+        out["scope_flags"] = []
     if a.no_orca:
         return out
     o = {"mail": {}, "workers": [], "settled": {}, "error": None}
@@ -305,6 +312,31 @@ def turn_stops(repo, o, rows, skip):
     return list(found.values()), [e for d, e in errs.items() if d not in found]
 
 
+def scope_flags(repo, cfg, tasks, n=None):
+    """같은 작업의 검토 차단(major·fail)이 이어질 때 → [(작업 ID, 종류, 연속 수, 계열)]. 끝없는 약속을 고치기로 돌지 않게."""
+    n = int(n or kitlib.cfg_get(cfg, "review.scope_escalate_after", 2) or 2)
+    by = {}
+    for f in routing.read_feedback(repo):
+        by.setdefault(f["kit_id"], []).append(f)
+    out = []
+    for tid, fs in by.items():
+        t = tasks.get(tid) or {}
+        if str(t.get("status", "")).lower() == "merged" or t.get("hold"):
+            continue   # 끝났거나 이미 결정을 기다린다
+        fs.sort(key=lambda f: f["ts"])
+        tail = []
+        for f in reversed(fs):
+            if f["score"] >= 0.7:   # pass·minor에서 끊긴다
+                break
+            tail.append(f)
+        cats = [f["category"] for f in tail[:n]]
+        if len(tail) >= n and cats[0] and all(c == cats[0] for c in cats):
+            out.append((tid, "범위 결정 필요", len(tail), cats[0]))
+        elif len(tail) >= n + 1:
+            out.append((tid, "검토 반복", len(tail), ", ".join(sorted({c for c in (f["category"] for f in tail) if c})) or ""))
+    return out
+
+
 def started_ts(ts):
     """dispatch.tsv의 투입 시각('YYYY-MM-DD HH:MM:SS', 로컬) → epoch | None."""
     try:
@@ -337,11 +369,23 @@ def quota_stalls(repo, catalog, pol, workers, quota=None):
     return out
 
 
+def scope_lines(s):
+    out = []
+    for tid, kind, k, cat in s.get("scope_flags") or []:
+        if kind == "범위 결정 필요":
+            out.append(f"범위 결정 필요 {tid}: '{cat}' 차단 {k}회 연속 → 한 번 더 고치지 말고 보장/범위 밖을 바꾸는 선택지(축소·기본 차단·범위 밖)를 "
+                       "마스터에 올린다. 결정 전까지 tasks.yaml에 hold")
+        else:
+            out.append(f"검토 반복 {tid}: 차단 {k}회 연속" + (f"(계열 {cat})" if cat else "(계열 기록 없음: feedback --category)")
+                       + " → 같은 원인인지 보고 범위 선택지를 검토")
+    return out
+
+
 def stall_lines(s, stale_min):
     o = s.get("orca")
     if o is None:
-        return ["(Orca 조회 안 함: --no-orca)"]
-    lines = []
+        return scope_lines(s) + ["(Orca 조회 안 함: --no-orca)"]
+    lines = scope_lines(s)
     now = time.time()
     qs = {q["dispatch"]: q for q in s.get("quota_stalls") or []}
     tsd = {x["dispatch"]: x for x in s.get("turn_stops") or []}

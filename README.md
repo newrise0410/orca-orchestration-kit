@@ -10,7 +10,7 @@ AI 에이전트 다중 세션으로 소프트웨어를 개발하는 워크플로
 - 단일 HTML 대시보드(오프라인, 작업 보드), 실행 격리 모듈(선택), 검토 단계 모듈(선택)
 - 배포: Claude Code 플러그인 마켓플레이스(자동 업데이트) 또는 심볼릭 링크
 
-버전: **v0.8.5** (2026-11-25) · 라이선스: [Apache-2.0](LICENSE)
+버전: **v0.9.0** (2026-11-25) · 라이선스: [Apache-2.0](LICENSE)
 
 ---
 
@@ -230,6 +230,7 @@ docs/                            VERIFY.md  DESIGN-NOTES.md  LESSONS.md
 
 | 버전 | 일자 | 내용 |
 |---|---|---|
+| v0.9.0 | 2026-11-25 | **범위 관리(교훈 L-22, 현장: 투입의 약 80%가 보완·검토)**. (1) tasks.yaml `guarantees`(보장하는 것)·`out_of_scope`(범위 밖) 닫힌 목록: 구현 명세에 절로 붙고 검토 명세는 그 항목을 깨는 실행 반례만 차단으로 삼는다. `validate_dag`가 L1·L2 투입 전 작업에 목록이 없거나 '언제나·모든·완전히' 같은 열린 약속이 있으면 경고. (2) 핵심 약속 점검표 `orchestration/checklist.md`(seed, '## 항목' 절): 구현·보완·이어받기 명세에 붙어 워커가 항목마다 시험 이름을 보고하고, 검토 명세에도 붙어 먼저 본다. (3) `models.py feedback --category`로 차단 계열을 남기면 같은 작업에서 같은 계열이 2회 연속(`kit.yaml review.scope_escalate_after`)일 때 정지 점검이 '범위 결정 필요', 계열이 달라도 3회 연속이면 '검토 반복'(--no-orca에서도). (4) 검토 대체 `routing.cross_review: model`: 독립 구독이 모자라면 같은 구독의 다른 모델 허용(한도 전환 포함). 구현한 모델 자신은 어느 설정에서도 −3 더 깎인다. 현장 적용은 이정표에 묶는다(`docs/UPGRADE-NOTES.md`) |
 | v0.8.5 | 2026-11-25 | **결함(현장):** 메일에서 필터 중단을 찾지 못했다. 메일함을 `--full` 없이 읽어 본문이 221자에서 잘렸고(Last output 없음, payload에 stopReason 없음), `--full`이면 payload가 JSON 문자열이라 `.get`에서 오류가 났다. 이제 `inbox --full`로 읽고 `kitlib.msg_payload`가 문자열 payload를 풀며, errored 판정에 제목('Worker stopped on an error')과 본문('ended its turn on an error')을 넣었다. 한도로 멈춘 워커의 errored 메일('quota reached … Resets in …')은 필터·오류 중단으로 잡지 않는다(한도 정지가 맡는다). 시험의 가짜 Orca를 실제 꼴(잘린 본문·문자열 payload)로 바꿨다. **운영 절차(L-21):** 키트 적용 중 매니저의 기록 커밋에 키트 변경이 섞였다 → `upgrade.md`에 적용 직전·끝 알림 단계, `kit.py upgrade --apply`가 끝에 `git add -- <키트가 바꾼 경로>`를 출력, MANAGER.md에 '기록 커밋은 경로를 지정해 담는다' |
 | v0.8.4 | 2026-11-25 | **필터 중단을 화면·메일에서도 찾는다**(현장: codex 안전 필터 안내는 transcript에 남지 않고 터미널 화면에만 찍힌다. Orca escalation 메일 `stopReason=errored`의 "Last output:"에 남는다). 감지 입력: (1) transcript 마지막 응답(전과 같음) (2) 진행 중 워커의 터미널 화면 끝(`worker-read --source terminal`의 `terminal.tail`) (3) 작업 Run 메일함의 errored escalation 본문 Last output — 이미 멈춘 워커도 잡는다. 화면·메일은 검토 대상 문서 글이 섞이므로 안내 블록의 고정 줄(`ⓘ This content can’t be shown`, `We take extra care with some … requests`, Claude `API Error: … Usage Policy`)과 **줄 전체가** 맞을 때만, 곧은·굽은 따옴표 모두. errored인데 한도도 차단 문구도 아니면 `오류 중단`으로 알려 사람이 본다. 이미 멈춘 워커는 worker-stop을 건너뛰고 이어받기, 넘긴 dispatch와 같은 작업의 옛 dispatch 메일은 다시 잡지 않는다 |
 | v0.8.3 | 2026-11-25 | 현장 피드백 둘. **'커밋 없음' 오탐:** 보완 워커가 앞 차수와 같은 브랜치를 쓰면 앞 차수 커밋 시각으로 재서, 투입 28분째 워커가 '마지막 커밋 61분 전'으로 잡혔다. 이제 마지막 커밋과 이 투입의 시작(dispatch.tsv) 중 늦은 쪽으로 잰다. **필터 중단:** 한도가 아닌 이유(안전 필터·이용 정책 차단)로 턴이 끊기면 워커는 살아 보여도 일하지 않는다. 정지 점검이 워커의 마지막 응답(`worker-read`, assistant 글·오류 블록만, 도구 결과는 보지 않는다)에서 차단 문구를 찾아 `필터 중단`으로 알리고, `quota_switch.py`가 한도 전환과 같은 절차(보존 → 정리 → 다른 구독으로 이어받기)로 넘긴다. 기다려도 풀리지 않아 대기 판정은 없고, 그 모델은 그 작업의 재투입 후보에서 뺀다(`quota_switch.tsv` 9번째 칸 filter). 이어받기 메모에 같은 입력을 되풀이하지 말라는 지시를 넣는다. 설정 `routing.on_filter: switch|wait`. 예약 점검(`quota_watch`)도 필터 중단을 알린다. 보존 브랜치 이름에 dispatch 끝자리를 붙여 같은 초에 두 번 넘겨도 겹치지 않게 했다 |

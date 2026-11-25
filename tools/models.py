@@ -10,7 +10,7 @@
   python3 orchestration/tools/models.py stats               # 모델별 실적(학습 보정)·에이전트별 사용량
   python3 orchestration/tools/models.py cooldown <에이전트|키> [--min 90] [--reason ..]   # 사용량 한도 → 잠시 빼기
   python3 orchestration/tools/models.py cooldown --clear <에이전트|키>
-  python3 orchestration/tools/models.py feedback <ID> pass|minor|major|fail [--note ..]   # 검토 판정을 실적에 반영
+  python3 orchestration/tools/models.py feedback <ID> pass|minor|major|fail [--note ..] [--category 계열]   # 검토 판정을 실적에 반영
 
 launch.sh는 작업에 agent/model이 없으면 이 라우팅으로 고른다(--no-route로 끔).
 """
@@ -304,8 +304,9 @@ def cmd_feedback(a):
     p = routing.state_dir(repo) / "route_feedback.tsv"
     p.parent.mkdir(parents=True, exist_ok=True)
     with open(p, "a", encoding="utf-8") as f:
-        f.write("\t".join([dt.datetime.now().strftime("%F %T"), a.id, str(VERDICT[a.verdict]), (a.note or "").replace("\t", " ")]) + "\n")
-    print(f"{a.id}: {a.verdict} ({VERDICT[a.verdict]}) 기록 → 마지막 구현 투입의 실적에 반영")
+        f.write("\t".join([dt.datetime.now().strftime("%F %T"), a.id, str(VERDICT[a.verdict]), (a.note or "").replace("\t", " "),
+                           (a.category or "").replace("\t", " ").strip()]) + "\n")
+    print(f"{a.id}: {a.verdict} ({VERDICT[a.verdict]})" + (f" · 계열 {a.category}" if a.category else "") + " 기록 → 마지막 구현 투입의 실적에 반영")
     return 0
 
 
@@ -344,6 +345,7 @@ def main(argv=None):
     p.add_argument("id")
     p.add_argument("verdict", choices=list(VERDICT))
     p.add_argument("--note")
+    p.add_argument("--category", help="차단 원인 계열(같은 구조적 원인이면 같은 이름. 예: 영역분리). 같은 계열이 연속되면 정지 점검이 범위 결정을 권한다")
     a = ap.parse_args(argv)
     return {"discover": cmd_discover, "update": cmd_update, "bench": cmd_bench, "quota": cmd_quota, "route": cmd_route, "plan": cmd_plan, "stats": cmd_stats,
             "cooldown": cmd_cooldown, "feedback": cmd_feedback}[a.cmd](a)

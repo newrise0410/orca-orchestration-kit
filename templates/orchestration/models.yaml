@@ -19,7 +19,7 @@ routing:
     codex: 4
     antigravity: 2
     grok: 2
-  cross_review: true           # 검토 워커는 구현한 구독과 다른 쪽을 우선 (같은 맹점을 덜 공유)
+  cross_review: true           # 검토 워커는 구현한 구독과 다른 쪽을 우선(같은 맹점을 덜 공유). model: 독립 구독이 모자랄 때 같은 구독의 다른 모델 허용(한도 전환에서도). false: 안 봄
   escalate_on_retry: true      # 앞선 시도가 실패한 작업은 난이도를 올리고 실패한 모델을 피한다
   learn: true                  # 투입 결과(dispatch.tsv × tasks.yaml × 검토 판정)로 모델 점수를 보정
   critical_dependents: 5       # 뒤에 기대는 미완료 작업이 이만큼이면 임계 경로: 능력 부족 벌점·속도 가중을 올린다

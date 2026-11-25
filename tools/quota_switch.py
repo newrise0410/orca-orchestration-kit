@@ -171,12 +171,19 @@ def decide(repo, cfg, tasks, catalog, pol, q, quota, live):
     # 넘겨받을 구독은 앞 워커가 풀릴 때까지(최대 switch_need_minutes) 버텨야 한다 — 곧 다시 찰 구독으로 넘기면 또 멈춘다
     left = (q["resets"] - time.time()) / 60 if q["resets"] else float(qc.get("switch_need_minutes", 120))
     need = min(float(qc.get("switch_need_minutes", 120)), max(left, 0))
-    impl = set()
-    if review and routing.rcfg(pol, "cross_review", True):   # 검토 독립성: 이 작업의 코드를 쓴 구독(이어받기 앞뒤 모두)은 아예 뺀다
-        impl = {r["agent"] for r in routing.read_dispatch(repo, set(tasks))
-                if r["kit_id"] == tid and r["mode"] in ("new", "retry", "handoff") and r["agent"]}
+    impl, impl_keys = set(), set()
+    xr = routing.rcfg(pol, "cross_review", True)
+    if review and xr:   # 검토 독립성: 이 작업의 코드를 쓴 구독(이어받기 앞뒤 모두)은 아예 뺀다
+        rows_ = [r for r in routing.read_dispatch(repo, set(tasks))
+                 if r["kit_id"] == tid and r["mode"] in ("new", "retry", "handoff") and r["agent"]]
+        impl = {r["agent"] for r in rows_}
+        impl_keys = {routing.key_of_row(r, catalog["models"]) for r in rows_} - {None}
+    ex_keys = ({q["key"]} if filt and q.get("key") else set())
+    ex_agents = impl
+    if review and str(xr).lower() == "model":   # 대체: 같은 구독이라도 구현한 모델만 아니면 검토할 수 있다
+        ex_agents, ex_keys = set(), ex_keys | impl_keys
     dec = routing.route(repo, cfg, tid, tasks, "review" if review else "handoff", live_dids=live, catalog=catalog, pol=pol, quota=quota,
-                        need_minutes=need, exclude_agents=impl, exclude_keys={q["key"]} if filt and q.get("key") else None)
+                        need_minutes=need, exclude_agents=ex_agents, exclude_keys=ex_keys or None)
     if not dec.get("key"):
         ex = dec.get("excluded", {}).values()
         tight = sorted({v for v in ex if v.startswith("넘겨받기엔 빠듯")})

@@ -67,6 +67,11 @@ tasks:
       목록 표시·추가·완료 토글 시나리오 3개 통과(계약 기반 모의 응답), API 오류 시 재시도 안내 표시,
       키보드만으로 추가·토글 가능.
     env: [sim]
+    guarantees:
+      - "목록·추가·완료 토글이 계약(contracts/openapi.yaml)의 응답 꼴대로 동작한다(모의 응답 시험 3개)"
+      - "API가 5xx·시간 초과를 돌려주면 재시도 안내를 보이고 입력한 제목을 지우지 않는다"
+      - "Tab·Enter·Space만으로 추가·토글할 수 있다"
+    out_of_scope: ["실제 API 연결(I-WEB에서)", "다른 사용자의 할 일", "오프라인 저장"]
     status: todo
 
   # ───────────────── W2 모듈 통합 ─────────────────
@@ -80,6 +85,8 @@ tasks:
     deps: [R-API-001]
     write_scope: [api/bringup/, docs/06_evidence/I-API/]
     acceptance: "req/R-API-* 전부 머지, 서버 기동·헬스 체크·계약 시험 통과"
+    guarantees: ["req/* 머지 뒤 int/api에서 전체 시험과 API 스모크(생성→조회→완료)가 통과한다"]
+    out_of_scope: ["웹 화면", "성능 목표"]
     status: todo
 
   - id: I-WEB
@@ -92,6 +99,8 @@ tasks:
     deps: [R-WEB-001]
     write_scope: [web/bringup/, docs/06_evidence/I-WEB/]
     acceptance: "req/R-WEB-* 전부 머지, 빌드 산출물 기동·화면 스모크 통과"
+    guarantees: ["req/* 머지 뒤 int/web에서 전체 시험과 화면 스모크(모의 API)가 통과한다"]
+    out_of_scope: ["실제 API 종단(S-01에서)", "성능 목표"]
     status: todo
 
   # ───────────────── W3 체계 통합 ─────────────────

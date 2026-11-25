@@ -3,7 +3,7 @@
 매니저가 설계·코드 검토를 낼 때, 보고서를 반영할 때, 잘못 머지한 것을 되돌릴 때 따른다.
 
 ## 1. 내기
-- **구현 검토(작업 하나):** `orchestration/tools/launch.sh --review <ID>`. 명세는 `orchestration/templates/review-spec.md`로 렌더링되고(`specs/<ID>.review.md`), 보고서 브랜치는 `req/<ID>-RV`, **기준은 `{{MAIN_BRANCH}}`**, 대상은 그 작업 브랜치다. 차수는 `--suffix r2`. 모델은 kit.yaml `review`를 비워 두면 라우팅이 구현한 구독과 다른 쪽을 고른다(`routing.cross_review`).
+- **구현 검토(작업 하나):** `orchestration/tools/launch.sh --review <ID>`. 명세는 `orchestration/templates/review-spec.md`로 렌더링되고(`specs/<ID>.review.md`), 보고서 브랜치는 `req/<ID>-RV`, **기준은 `{{MAIN_BRANCH}}`**, 대상은 그 작업 브랜치다. 차수는 `--suffix r2`. 모델은 kit.yaml `review`를 비워 두면 라우팅이 구현한 구독과 다른 쪽을 고른다(`routing.cross_review`). 독립 검토 구독이 모자라면 `routing.cross_review: model`로 같은 구독의 다른 모델(예: sonnet 구현 → opus 검토)을 허용한다. 구현한 모델 자신은 어느 설정에서도 가장 뒤로 간다. 쉬는 구독(예: grok)을 Orca에서 켜 두면 검토 대기가 준다.
 - **설계 검토·범위 검토(독립 작업):** tasks.yaml 항목에 `spec_template: review-spec.md`, `target: <검토 대상 브랜치나 커밋>`, `branch: req/<검토ID>`, `base: {{MAIN_BRANCH}}`, `write_scope: [docs/06_evidence/<검토ID>/]`을 주고 `launch.sh <검토ID>`.
 - 검토 대상 위에 보고서를 커밋하게 하지 않는다(보고서 브랜치가 대상에서 갈라지면 반영할 때 검토가 막은 코드까지 들어온다).
 - 다음 검토에는 지난 지적의 해소 판정 표를 요구한다. 검토 범위·항목은 명세(acceptance 또는 `specs/<ID>.review.extra.md`)에 처음부터 넣는다.
@@ -11,13 +11,15 @@
 ## 2. 반영
 - **보고서는 경로만 가져온다:** `git checkout {{REF}}req/<검토ID> -- docs/06_evidence/<검토ID>/` → `[G]` 커밋.
 - 브랜치를 머지해야 하면 `merge-gate.md` 2의 범위 확인(허용 경로 `docs/06_evidence/<검토ID>/`)을 통과할 때만 한다.
-- **판정을 모델 실적에 남긴다:** `python3 orchestration/tools/models.py feedback <ID> pass|minor|major|fail --note '<한 줄>'` (H 없음·M만 = minor, H 있음 = major, 다시 짜야 함 = fail). 라우터가 그 작업을 맡았던 모델 점수에 반영한다.
+- **판정을 모델 실적에 남긴다:** `python3 orchestration/tools/models.py feedback <ID> pass|minor|major|fail --category <계열> --note '<한 줄>'` (H 없음·M만 = minor, H 있음 = major, 다시 짜야 함 = fail). 라우터가 그 작업을 맡았던 모델 점수에 반영한다. **차단(major·fail)이면 원인 계열을 꼭 적는다**(같은 구조적 원인이면 같은 이름. 예: 영역분리, CLI차단, 승인무결성) — 정지 점검이 이것으로 '범위 결정 필요'를 낸다.
 - 지적이 남으면 `<지적.md>`에 정리해 `launch.sh --retry <지적.md> --suffix r1 <ID>`로 구현 작업에 다시 낸다(그 작업 브랜치에서 분기).
 
 ## 3. 판정 기준
 - **코드 검토의 머지 차단은 수정된 코드에서 실행으로 재현되는 반례(H)만이다.** 실행 반례 없이 문서 해석으로만 남는 지적은 근거를 붙여 M 백로그로 돌린다. 지적은 심각도와 관계없이 전부 작업이나 '수용 안 함(이유)'으로 닫는다.
 - **설계 검토는 수렴을 보고 닫는다.** 회차마다 H 수·원인 계열을 `orchestration/state/issues.md`에 남긴다. 회차마다 새 장치에서 새 H가 나오면 **마지막 좁은 검토**(정해 둔 항목만)를 내고, 결과와 상관없이 구현으로 간다. 남은 H는 구현 명세의 '구현 전 필수 수정 + 회귀 시험'으로 넣고 코드 검토(실행 재현)에서 확인한다.
-- **같은 계열 H가 반복되면** 증상 수정을 멈추고 구조 수정 작업을 낸다. 구조 수정 뒤에도 반복되면 **범위 축소안**을 선택지로 정리해 마스터에 올린다(범위는 사용자 결정).
+- **같은 계열 차단이 2회 연속이면(`kit.yaml review.scope_escalate_after`) 한 번 더 고치지 않고 범위 선택지를 올린다**(교훈 L-22). 정지 점검이 '범위 결정 필요'로 알린다. 반례가 끝없이 나오는 약속(원문을 가린다, 본문과 대조한다, 언제 닫아도 안전하다)은 고치기를 되풀이해도 닫히지 않고, 현장에서는 모두 '약속의 범위를 바꾼 결정'으로 닫혔다(기본 차단, 기능 축소, 범위 밖으로). 선택지를 정리해 마스터에 올리고(범위는 사용자 결정), 결정 전까지 작업에 `hold`. 결정되면 `guarantees`·`out_of_scope`를 고친 뒤 다시 낸다.
+- **같은 꼴의 지적이 두 작업 이상에서 나오면** `orchestration/checklist.md` '항목'에 한 줄로 넣는다. 다음 구현 명세부터 붙고, 워커가 완료 보고 전에 항목마다 시험으로 확인한다.
+- **검토는 보장 목록 안에서 차단한다:** 작업에 `guarantees`가 있으면 머지 차단 H는 그 항목을 깨는 실행 반례만이다. 범위 밖 반례는 정보로 남기고, 새 약속이 필요해 보이면 범위 선택지로 올린다.
 
 ## 4. 잘못 머지했을 때 (rebase·force push 금지)
 1. `git revert -m 1 <머지 커밋>`.
