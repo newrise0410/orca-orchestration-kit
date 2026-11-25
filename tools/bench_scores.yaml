@@ -1,0 +1,298 @@
+# 공개 벤치마크 점수 (models.py bench가 만든다. 손으로 고치지 말고 다시 받는다)
+# 출처: Terminal-Bench https://www.tbench.ai/leaderboard/terminal-bench/4.1
+generated: '2026-11-25'
+sources:
+  tb:
+    name: Terminal-Bench 4.1
+    url: https://www.tbench.ai/leaderboard/terminal-bench/4.1
+    rows_total: 67
+    note: CLI 에이전트 × 모델 × effort 공식 리더보드. acc = 해결률(%), ci95 = 95% 신뢰구간 반폭
+tb:
+- agent: Claude Code
+  model: Opus 5.5
+  effort: max
+  acc: 65.76
+  ci95: 3.11
+  date: '2026-09-22'
+  out_tokens_per_task: 269135
+  min_per_task: 79.8
+- agent: Claude Code
+  model: Fable 5.2
+  effort: max
+  acc: 65.76
+  ci95: 2.85
+  date: '2026-11-09'
+  out_tokens_per_task: 491352
+  min_per_task: 122.2
+- agent: Antigravity CLI
+  model: Gemini 4 Carbon
+  effort: high
+  acc: 64.55
+  ci95: 3.23
+  date: '2026-10-28'
+  out_tokens_per_task: 166081
+  min_per_task: 58.3
+- agent: Claude Code
+  model: Sonnet 5.5
+  effort: max
+  acc: 63.94
+  ci95: 3.0
+  date: '2026-09-28'
+  out_tokens_per_task: 565387
+  min_per_task: 123.9
+- agent: Codex
+  model: GPT-6.2 Astra
+  effort: max
+  acc: 62.12
+  ci95: 2.3
+  date: '2026-11-17'
+  out_tokens_per_task: 49894
+  min_per_task: 22.5
+- agent: Codex
+  model: GPT-6.2 Sol
+  effort: max
+  acc: 61.52
+  ci95: 2.75
+  date: '2026-11-17'
+  out_tokens_per_task: 48561
+  min_per_task: 20.2
+- agent: Antigravity CLI
+  model: Gemini 4 Neon
+  effort: xhigh
+  acc: 61.21
+  ci95: 2.85
+  date: '2026-11-18'
+  out_tokens_per_task: 173583
+  min_per_task: 82.0
+- agent: Codex
+  model: GPT-6.1 Sol
+  effort: max
+  acc: 60.91
+  ci95: 2.97
+  date: '2026-09-29'
+  out_tokens_per_task: 94892
+  min_per_task: 52.9
+- agent: Codex
+  model: GPT-6 Astra
+  effort: max
+  acc: 60.3
+  ci95: 2.82
+  date: '2026-09-03'
+  out_tokens_per_task: 72693
+  min_per_task: 46.6
+- agent: Codex
+  model: GPT-6 Astra
+  effort: high
+  acc: 60.0
+  ci95: 2.79
+  date: '2026-09-03'
+  out_tokens_per_task: 41527
+  min_per_task: 35.2
+- agent: Codex
+  model: GPT-6 Astra
+  effort: xhigh
+  acc: 59.7
+  ci95: 2.69
+  date: '2026-09-03'
+  out_tokens_per_task: 45303
+  min_per_task: 36.8
+- agent: Claude Code
+  model: Fable 5.1
+  effort: xhigh
+  acc: 57.58
+  ci95: 3.31
+  date: '2026-09-01'
+  out_tokens_per_task: 152808
+  min_per_task: 53.4
+- agent: Claude Code
+  model: Fable 5.1
+  effort: max
+  acc: 57.27
+  ci95: 3.83
+  date: '2026-09-01'
+  out_tokens_per_task: 191277
+  min_per_task: 64.9
+- agent: Codex
+  model: GPT-6 Astra
+  effort: medium
+  acc: 55.15
+  ci95: 2.66
+  date: '2026-09-03'
+  out_tokens_per_task: 32638
+  min_per_task: 31.4
+- agent: Claude Code
+  model: Fable 5.1
+  effort: high
+  acc: 54.85
+  ci95: 3.41
+  date: '2026-09-01'
+  out_tokens_per_task: 113421
+  min_per_task: 50.3
+- agent: Claude Code
+  model: Fable 5.1
+  effort: medium
+  acc: 53.94
+  ci95: 3.39
+  date: '2026-09-01'
+  out_tokens_per_task: 78763
+  min_per_task: 42.1
+- agent: Claude Code
+  model: Opus 5
+  effort: xhigh
+  acc: 53.33
+  ci95: 3.09
+  date: '2026-07-24'
+  out_tokens_per_task: 179280
+  min_per_task: 75.2
+- agent: Codex
+  model: GPT-6.1 Terra
+  effort: max
+  acc: 53.33
+  ci95: 3.09
+  date: '2026-10-26'
+  out_tokens_per_task: 100137
+  min_per_task: 2.1
+- agent: Claude Code
+  model: Opus 5
+  effort: max
+  acc: 52.12
+  ci95: 3.39
+  date: '2026-07-24'
+  out_tokens_per_task: 200036
+  min_per_task: 79.9
+- agent: Codex
+  model: GPT-6 Astra
+  effort: low
+  acc: 50.91
+  ci95: 2.79
+  date: '2026-09-03'
+  out_tokens_per_task: 24207
+  min_per_task: 28.1
+- agent: Codex
+  model: GPT-6 Sol
+  effort: max
+  acc: 50.3
+  ci95: 3.23
+  date: '2026-09-22'
+  out_tokens_per_task: 92641
+  min_per_task: 44.4
+- agent: Claude Code
+  model: Opus 5
+  effort: high
+  acc: 49.7
+  ci95: 3.69
+  date: '2026-07-24'
+  out_tokens_per_task: 144241
+  min_per_task: 63.7
+- agent: Claude Code
+  model: Opus 5
+  effort: medium
+  acc: 45.15
+  ci95: 3.85
+  date: '2026-07-24'
+  out_tokens_per_task: 101450
+  min_per_task: 54.9
+- agent: Claude Code
+  model: Fable 5
+  effort: max
+  acc: 44.85
+  ci95: 3.83
+  date: '2026-06-09'
+  out_tokens_per_task: 177636
+  min_per_task: 70.0
+- agent: Claude Code
+  model: Fable 5.1
+  effort: low
+  acc: 43.33
+  ci95: 3.61
+  date: '2026-09-01'
+  out_tokens_per_task: 60409
+  min_per_task: 38.2
+- agent: Claude Code
+  model: Haiku 5.5
+  effort: max
+  acc: 40.0
+  ci95: 3.61
+  date: '2026-10-07'
+  out_tokens_per_task: 386482
+  min_per_task: 2.3
+- agent: Grok Build
+  model: Grok 4.7
+  effort: xhigh
+  acc: 38.79
+  ci95: 3.59
+  date: '2026-09-21'
+  out_tokens_per_task: 69627
+  min_per_task: 95.0
+- agent: Codex
+  model: GPT-5.6 Sol
+  effort: max
+  acc: 38.48
+  ci95: 3.83
+  date: '2026-06-26'
+  out_tokens_per_task: 71064
+  min_per_task: 39.8
+- agent: Claude Code
+  model: Opus 5
+  effort: low
+  acc: 34.85
+  ci95: 3.92
+  date: '2026-07-24'
+  out_tokens_per_task: 72228
+  min_per_task: 49.1
+- agent: Claude Code
+  model: Opus 4.8
+  effort: max
+  acc: 23.64
+  ci95: 3.59
+  date: '2026-05-28'
+  out_tokens_per_task: 269131
+  min_per_task: 86.0
+- agent: Codex
+  model: GPT-5.6 Terra
+  effort: max
+  acc: 21.52
+  ci95: 3.25
+  date: '2026-06-26'
+  out_tokens_per_task: 100681
+  min_per_task: 41.9
+- agent: Grok Build
+  model: Grok 4.6
+  effort: high
+  acc: 19.7
+  ci95: 3.09
+  date: '2026-08-12'
+  out_tokens_per_task: 98843
+  min_per_task: 39.2
+- agent: Codex
+  model: GPT-5.6 Luna
+  effort: max
+  acc: 17.58
+  ci95: 2.91
+  date: '2026-06-26'
+  out_tokens_per_task: 185705
+  min_per_task: 68.1
+- agent: Codex
+  model: GPT-6 Luna
+  effort: max
+  acc: 15.15
+  ci95: 2.66
+  date: '2026-09-22'
+  out_tokens_per_task: 137851
+  min_per_task: 38.1
+- agent: Grok Build
+  model: Grok 4.5
+  effort: high
+  acc: 12.42
+  ci95: 2.62
+  date: '2026-07-16'
+  out_tokens_per_task: 98149
+  min_per_task: 52.7
+- agent: Claude Code
+  model: Sonnet 5
+  effort: max
+  acc: 12.12
+  ci95: 3.0
+  date: '2026-06-30'
+  out_tokens_per_task: 353329
+  min_per_task: 108.5

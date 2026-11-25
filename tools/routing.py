@@ -27,6 +27,7 @@ import kitlib
 yaml = kitlib.yaml
 TOOLS = Path(__file__).resolve().parent
 CATALOG = TOOLS / "model_catalog.yaml"
+BENCH = TOOLS / "bench_scores.yaml"
 POLICY_REL = "orchestration/models.yaml"
 STATE_REL = "orchestration/state"
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
@@ -81,9 +82,26 @@ def load(repo, catalog_path=None, policy_path=None):
     for k, m in (cat.get("models") or {}).items():
         models[k] = dict(m)
     for k, m in (pol.get("models") or {}).items():
-        models[k] = deep_merge(models.get(k, {}), m or {})
+        m = m or {}
+        if ("model" in m or "model_by_effort" in m) and "family" not in m:
+            m = dict(m, family=None)   # 프로젝트가 모델 ID를 직접 정했으면 계열 따라가기를 끈다
+            if "model" in m and "model_by_effort" not in m:
+                m["model_by_effort"] = None
+        if "quality" in m:
+            m = dict(m, quality_pinned=True)   # 프로젝트가 품질을 직접 정했으면 벤치 점수로 바꾸지 않는다
+        models[k] = deep_merge(models.get(k, {}), m)
     agents = deep_merge(cat.get("agents") or {}, pol.get("agents") or {})
-    return {"agents": agents, "models": models, "version": cat.get("version")}, pol
+    bench = {}
+    if rcfg(pol, "bench", True):
+        # 키트 판(tools/bench_scores.yaml)과 프로젝트가 직접 받은 판(state/bench_scores.yaml) 중 더 새 것
+        for bp in (Path(catalog_path).with_name("bench_scores.yaml") if catalog_path else BENCH, Path(repo) / STATE_REL / "bench_scores.yaml"):
+            try:
+                b = yaml.safe_load(bp.read_text(encoding="utf-8")) or {} if bp.is_file() else {}
+            except (OSError, yaml.YAMLError):
+                b = {}
+            if b.get("tb") and str(b.get("generated", "")) >= str(bench.get("generated", "")):
+                bench = dict(b, _path=str(bp))
+    return {"agents": agents, "models": models, "version": cat.get("version"), "bench": bench}, pol
 
 
 def rcfg(pol, key, default=None):
@@ -161,6 +179,202 @@ def discover(repo, catalog, refresh=False, timeout=30):
 
 def model_ids(m):
     return [str(m.get("model"))] + [str(x) for x in (m.get("model_by_effort") or {}).values()]
+
+
+# ───────────────────────── 계열 따라가기 (카탈로그 family:)
+# family: 'gpt-{v}-sol' 처럼 판 번호 자리를 {v}로 적으면, CLI 모델 목록에서 그 꼴의 가장 높은 판을 쓴다.
+# 'gemini-{v}-neon-{effort}' 처럼 {effort}가 있으면 그 판의 effort별 ID로 model_by_effort를 다시 만든다.
+# 카탈로그의 model/model_by_effort는 목록을 모를 때(별칭 CLI·목록 실패) 쓰는 기본값이다.
+
+def family_regex(fam):
+    rx = re.escape(str(fam)).replace(r"\{v\}", r"(?P<v>\d+(?:[.\-]\d+)*)").replace(r"\{effort\}", r"(?P<e>" + "|".join(EFFORTS) + ")")
+    return re.compile("^" + rx + "$")
+
+
+def vkey(v):
+    return tuple(int(x) for x in re.split(r"[.\-]", v) if x.isdigit())
+
+
+def family_members(fam, known):
+    """{판: {effort|None: id}} — 목록에서 계열에 맞는 ID."""
+    rx, out = family_regex(fam), {}
+    for i in known or ():
+        mm = rx.match(i)
+        if mm:
+            out.setdefault(mm.group("v"), {})[mm.groupdict().get("e")] = i
+    return out
+
+
+def resolve_model(m, known):
+    """family가 있으면 목록의 가장 높은 판으로 바꾼 사본. 바꿨으면 resolved_from에 원래 ID."""
+    fam = m.get("family")
+    if not fam or known is None:
+        return m
+    mem = family_members(fam, known)
+    if not mem:
+        return m
+    best = max(mem, key=vkey)
+    ids = mem[best]
+    out = dict(m)
+    if "{effort}" in str(fam):
+        mbe = {e: ids[e] for e in EFFORTS if e in ids}
+        if not mbe:
+            return m
+        out["model_by_effort"] = mbe
+        out["model"] = mbe.get("medium") or next(iter(mbe.values()))
+    else:
+        out["model"] = ids.get(None) or next(iter(ids.values()))
+    if out["model"] != m.get("model"):
+        out["resolved_from"] = m.get("model")
+    out["family_version"] = best
+    return out
+
+
+def resolve_catalog(catalog, disc):
+    """discover 결과로 모든 family 항목을 최신 판으로 맞추고, 벤치 점수가 있으면 품질을 그것으로 바꾼 카탈로그 사본."""
+    models = {k: resolve_model(m, (disc.get(m.get("agent")) or {}).get("models")) for k, m in catalog["models"].items()}
+    return apply_bench(dict(catalog, models=models))
+
+
+# ───────────────────────── 벤치 점수 → 품질 (tools/bench_scores.yaml, models.py bench로 갱신)
+# 카탈로그 항목의 bench_name('GPT-{v} Sol')과 에이전트의 bench_agent('Codex')로 Terminal-Bench 줄을 찾는다.
+# 판: family로 고른 판(없으면 벤치에 있는 가장 높은 판). 그 판 점수가 아직 없으면 바로 아래 판 점수를 쓰고 '옛 판'으로 적는다.
+# 품질 = 5 × (그 모델의 가장 좋은 effort 해결률 ÷ 카탈로그 안 최고 해결률), 최저 1. 다른 CLI의 점수는 빌리지 않는다(실행 환경 차이가 크다).
+
+def bench_pick(m, agents, rows):
+    ag = (agents.get(m.get("agent")) or {}).get("bench_agent")
+    pat = m.get("bench_name")
+    if not (ag and pat and rows):
+        return None
+    rx = re.compile("^" + re.escape(str(pat)).replace(r"\{v\}", r"(?P<v>\d+(?:\.\d+)*)") + "$", re.I)
+    by = {}
+    for r in rows:
+        mm = rx.match(str(r.get("model", "")))
+        if mm and str(r.get("agent", "")).lower() == str(ag).lower() and r.get("acc") is not None:
+            by.setdefault(mm.group("v"), []).append(r)
+    if not by:
+        return None
+    want = str(m.get("family_version") or "").replace("-", ".")
+    vs = sorted(by, key=vkey)
+    if want and want in by:
+        v, old = want, False
+    elif want:
+        lower = [x for x in vs if vkey(x) < vkey(want)]
+        if not lower:
+            return None
+        v, old = lower[-1], True
+    else:
+        v, old = vs[-1], False
+    best = max(by[v], key=lambda r: r["acc"])
+    return {"row": best, "version": v, "old": old}
+
+
+def apply_bench(catalog):
+    rows = (catalog.get("bench") or {}).get("tb") or []
+    if not rows:
+        return catalog
+    picks = {k: bench_pick(m, catalog["agents"], rows) for k, m in catalog["models"].items()}
+    top = max((p["row"]["acc"] for p in picks.values() if p), default=0)
+    if top <= 0:
+        return catalog
+    src = ((catalog.get("bench") or {}).get("sources") or {}).get("tb") or {}
+    models = {}
+    for k, m in catalog["models"].items():
+        p = picks.get(k)
+        if not p or m.get("quality_pinned"):
+            models[k] = dict(m, quality_src="models.yaml" if m.get("quality_pinned") else "카탈로그 추정(벤치 없음)")
+            continue
+        r = p["row"]
+        q = round(max(1.0, 5 * r["acc"] / top), 1)   # 해결률에 비례(0%면 0 → 1로 막는다). 1+4x는 약한 모델을 부풀렸다
+        models[k] = dict(m, quality=q, quality_catalog=m.get("quality"),
+                         quality_src=f"{src.get('name', 'Terminal-Bench')} {r['agent']} · {r['model']} {r.get('effort') or ''} {r['acc']:.1f}%"
+                                     + (" (옛 판)" if p["old"] else ""))
+    return dict(catalog, models=models)
+
+
+def unmatched_models(catalog, disc):
+    """{agent: (새 모델[], 아는 계열의 옛 판 수)} — 카탈로그 어느 항목에도 안 맞는 ID를 계열 옛 판과 나눈다."""
+    out = {}
+    for ag, info in disc.items():
+        known = info.get("models")
+        if not known:
+            continue
+        used, fams = set(), []
+        for m in catalog["models"].values():
+            if m.get("agent") == ag:
+                used.update(model_ids(m))
+                if m.get("family"):
+                    fams.append(family_regex(m["family"]))
+        new, old = [], 0
+        for i in known:
+            if i in used:
+                continue
+            if any(rx.match(i) for rx in fams):
+                old += 1
+            else:
+                new.append(i)
+        if new or old:
+            out[ag] = (sorted(new), old)
+    return out
+
+
+# ───────────────────────── CLI 업데이트 (카탈로그 agents.*.update)
+
+def cli_version(binp, spec, timeout=20):
+    code, out, err = _run([binp] + [str(x) for x in (spec.get("version") or ["--version"])], timeout)
+    txt = (out or err).strip().splitlines()
+    mm = re.search(r"\d+\.\d+(?:\.\d+)?(?:[-+][\w.]+)?", txt[0] if txt else "")
+    return mm.group(0) if mm else (txt[0][:40] if txt else "")
+
+
+def update_clis(repo, catalog, pol, agents=None, check_only=False, timeout=300, log=print):
+    """설치된 구독 CLI마다 자체 업데이트 명령을 돌린다 → {agent: {bin, before, after, status, detail}}.
+    snap 격리 설치본은 snap이 관리하므로 건너뛴다. 결과는 state/cli_update.json에 남긴다."""
+    allow = agents or rcfg(pol, "agents") or list(catalog["agents"])
+    res = {}
+    for ag, spec in catalog["agents"].items():
+        if ag not in allow:
+            continue
+        binp = shutil.which(str(spec.get("bin") or ag))
+        if not binp:
+            res[ag] = {"bin": None, "status": "없음", "detail": "CLI 없음"}
+            continue
+        real = os.path.realpath(binp)
+        if binp.startswith("/snap/") or real.startswith("/snap/") or real.endswith("/usr/bin/snap"):
+            res[ag] = {"bin": binp, "status": "건너뜀", "detail": "snap 설치본(snap refresh가 관리)", "before": cli_version(binp, spec)}
+            continue
+        before = cli_version(binp, spec)
+        cmd = spec.get("update")
+        if not cmd or check_only:
+            res[ag] = {"bin": binp, "before": before, "after": before, "status": "확인" if cmd else "명령 없음", "detail": ""}
+            continue
+        log(f"  {ag}: {' '.join([os.path.basename(binp)] + [str(x) for x in cmd])} …")
+        code, out, err = _run([binp] + [str(x) for x in cmd], timeout)
+        after = cli_version(binp, spec)
+        tail = (out + "\n" + err).strip().splitlines()
+        res[ag] = {"bin": binp, "before": before, "after": after,
+                   "status": ("갱신" if after != before else "최신") if code == 0 else "실패",
+                   "detail": "" if code == 0 else (tail[-1][:160] if tail else f"종료코드 {code}")}
+    p = state_dir(repo) / "cli_update.json"
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"ts": time.time(), "check_only": check_only, "agents": res}, ensure_ascii=False, indent=1), encoding="utf-8")
+    except OSError:
+        pass
+    return res
+
+
+def update_due(repo, pol):
+    """routing.auto_update: daily(기본) | weekly | off — 마지막 업데이트가 그보다 오래됐으면 True."""
+    mode = str(rcfg(pol, "auto_update", "daily")).lower()
+    span = {"daily": 24 * 3600, "weekly": 7 * 24 * 3600}.get(mode)
+    if not span:
+        return False
+    try:
+        d = json.loads((state_dir(repo) / "cli_update.json").read_text(encoding="utf-8"))
+        return d.get("check_only") or time.time() - float(d.get("ts", 0)) >= span
+    except (OSError, ValueError):
+        return True
 
 
 def availability(key, m, pol, disc):
@@ -373,6 +587,139 @@ def orca_usage(days=7):
             out.setdefault(ag, {}).setdefault(model, {})
             out[ag][model][day] = out[ag][model].get(day, 0) + tok
     return out
+
+
+# ───────────────────────── 잔여 한도 (Orca가 구독마다 모으는 사용률: orca account list --json → rateLimits)
+# 창마다 usedPercent·windowMinutes·resetsAt. Claude는 Fable 주간(fableWeekly)을 따로, Antigravity는 모델 묶음(buckets.group)별로 센다.
+# 숫자만 state/quota_cache.json에 5분 캐시한다(계정 이메일 등은 읽지도 남기지도 않는다).
+QUOTA_TTL = 300
+QUOTA_DEFAULT = {"enabled": True, "hard_percent": 98, "session_soft": 70, "pace_margin": 10, "use_it_hours": 24}
+
+
+def quota_cfg(pol):
+    q = rcfg(pol, "quota", {})
+    return {**QUOTA_DEFAULT, **(q if isinstance(q, dict) else {"enabled": bool(q)})}
+
+
+def _win(w):
+    if not isinstance(w, dict) or w.get("usedPercent") is None:
+        return None
+    try:
+        return {"used": float(w["usedPercent"]), "minutes": int(w.get("windowMinutes") or 0), "resets": float(w.get("resetsAt") or 0) / 1000}
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_quota(res):
+    """orca account list 결과 → {provider: {status, plan, windows{이름: 창}, groups{묶음: {session, weekly}}, alt[다른 계정 창]}}."""
+    rl = (res or {}).get("rateLimits") or {}
+    out = {}
+    for prov, v in rl.items():
+        if not isinstance(v, dict) or "provider" not in v:
+            continue
+        wins = {k: _win(x) for k, x in v.items() if isinstance(x, dict) and "usedPercent" in x}
+        groups = {}
+        for b in v.get("buckets") or []:
+            w, g = _win(b), str((b or {}).get("group") or "")
+            if w and g:
+                slot = "session" if w["minutes"] and w["minutes"] <= 600 else "weekly"
+                cur = groups.setdefault(g, {}).get(slot)
+                if not cur or w["used"] > cur["used"]:
+                    groups[g][slot] = w
+        alt = []
+        for a in rl.get("inactive" + prov[:1].upper() + prov[1:] + "Accounts") or []:
+            r = (a or {}).get("rateLimits") or {}
+            if r.get("status") == "ok":
+                ws = {k: _win(r.get(k)) for k in ("session", "weekly") if _win(r.get(k))}
+                if ws:
+                    alt.append(ws)
+        out[prov] = {"status": v.get("status"), "plan": v.get("planType"), "windows": {k: w for k, w in wins.items() if w},
+                     "groups": groups, "alt": alt, "updated": float(v.get("updatedAt") or 0) / 1000}
+    return out
+
+
+def read_quota(repo, refresh=False, net=True, timeout=15):
+    """{provider: …} | {} — 캐시가 5분 안이면 그것을, 아니면 Orca에 묻는다(net=False면 캐시만). 실패도 5분 캐시한다."""
+    cp = state_dir(repo) / "quota_cache.json"
+    try:
+        c = json.loads(cp.read_text(encoding="utf-8")) if cp.is_file() else {}
+    except (OSError, json.JSONDecodeError):
+        c = {}
+    if c and (not net or (not refresh and time.time() - float(c.get("ts", 0)) < QUOTA_TTL)):
+        return c.get("providers") or {}
+    if not net:
+        return {}
+    code, out, err = _run([os.environ.get("ORCA_CLI_COMMAND") or "orca", "account", "list", "--json"], timeout)
+    prov = {}
+    try:
+        d = json.loads(out)
+        if d.get("ok"):
+            prov = parse_quota(d.get("result") or {})
+    except (json.JSONDecodeError, AttributeError, TypeError):
+        prov = {}
+    try:
+        cp.parent.mkdir(parents=True, exist_ok=True)
+        cp.write_text(json.dumps({"ts": time.time(), "providers": prov}, ensure_ascii=False, indent=1), encoding="utf-8")
+    except OSError:
+        pass
+    return prov
+
+
+def _hm(ts):
+    t = dt.datetime.fromtimestamp(ts)
+    return t.strftime("%H:%M") if t.date() == dt.date.today() else t.strftime("%m-%d %H:%M")
+
+
+def model_windows(m, agents, quota):
+    """그 모델에 걸리는 창들 → (provider, {이름: 창}, 정보) | None."""
+    prov = (agents.get(m.get("agent")) or {}).get("quota") or m.get("agent")
+    info = quota.get(prov)
+    if not info or info.get("status") != "ok":
+        return None
+    base = {"session", "weekly", "monthly"}   # 공급자 공통 창. 모델별 창(fableWeekly 등)은 quota_extra로 고른 모델에만
+    wins = {k: w for k, w in (info.get("windows") or {}).items() if k in base}
+    grp = m.get("quota_group")
+    if grp and grp in (info.get("groups") or {}):
+        wins = dict(info["groups"][grp])
+    for extra in m.get("quota_extra") or []:
+        if extra in (info.get("windows") or {}):
+            wins[extra] = info["windows"][extra]
+    return prov, wins, info
+
+
+def quota_effect(m, agents, quota, pol, now=None):
+    """(제외 이유 | None, 점수 보정, 이유[]) — 소진(hard_percent 이상)은 초기화까지 제외, 빠듯하면 벌점, 곧 초기화되는데 많이 남으면 가점."""
+    cfg = quota_cfg(pol)
+    mw = model_windows(m, agents, quota) if cfg["enabled"] else None
+    if not mw:
+        return None, 0.0, []
+    prov, wins, info = mw
+    now = now or time.time()
+    adj, why = 0.0, []
+    for name, w in sorted(wins.items()):
+        if w["resets"] and w["resets"] <= now:
+            continue   # 이미 초기화된 창(캐시가 그 전 값)
+        short = bool(w["minutes"]) and w["minutes"] <= 600
+        label = "세션" if short else ("Fable 주간" if name == "fableWeekly" else "주간")
+        if w["used"] >= float(cfg["hard_percent"]):
+            alt = [a for a in info.get("alt") or [] if all(x["used"] < float(cfg["hard_percent"]) for x in a.values())]
+            hint = f" · 다른 {prov} 계정은 여유(Orca 계정 전환)" if alt else ""
+            return f"{prov} {label} 한도 {w['used']:.0f}% 소진 ({_hm(w['resets'])} 초기화){hint}" if w["resets"] else f"{prov} {label} 한도 소진{hint}", 0.0, []
+        if short:
+            if w["used"] > float(cfg["session_soft"]):
+                adj -= 2 * (w["used"] - float(cfg["session_soft"])) / (100 - float(cfg["session_soft"]))
+                why.append(f"{label} {w['used']:.0f}%")
+        elif w["minutes"] and w["resets"]:
+            left_h = (w["resets"] - now) / 3600
+            elapsed = max(0.0, min(1.0, 1 - left_h * 60 / w["minutes"]))
+            over = w["used"] - 100 * elapsed
+            if over > float(cfg["pace_margin"]):
+                adj -= min(2.0, 0.5 + (over - float(cfg["pace_margin"])) / 20)
+                why.append(f"{label} {w['used']:.0f}% (기간 {100 * elapsed:.0f}% 지남)")
+            elif left_h <= float(cfg["use_it_hours"]) and w["used"] < 60:
+                adj += 0.5
+                why.append(f"{label} {100 - w['used']:.0f}% 남고 {left_h:.0f}시간 뒤 초기화")
+    return None, adj, why
 
 
 def today_tokens(usage, agent):
@@ -654,7 +1001,7 @@ def score(key, m, c, pol, ctx):
         if (rcfg(pol, "prefer") or {}).get(tag) == key:
             s += 2
             why.append(f"prefer.{tag}")
-    stats = ctx["learned"].get((key, band(d)))
+    stats = ctx["learned"].get((key, band(c["difficulty"])))   # dispatch.tsv에 남는 난이도와 같은 대역(임계 경로 +0.5 전)
     if stats and rcfg(pol, "learn", True):
         tot, n = stats
         rate = (tot + 2) / (n + 3)
@@ -680,12 +1027,13 @@ def score(key, m, c, pol, ctx):
 
 
 def route(repo, cfg, tid, tasks, mode="new", live_dids=None, refresh=False, catalog=None, pol=None, disc=None,
-          extra_running=None, jev_net=True):
+          extra_running=None, jev_net=True, quota=None):
     """작업 하나의 결정. 반환: {key, agent, model, effort, difficulty, tags, reasons, why, alts, excluded}.
     후보가 없으면 key가 None. extra_running: 이번 호출에서 방금 띄운(아직 집계에 없는) 에이전트별 수."""
     if catalog is None or pol is None:
         catalog, pol = load(repo)
     disc = disc if disc is not None else discover(repo, catalog, refresh=refresh)
+    catalog = resolve_catalog(catalog, disc)
     t = tasks[tid]
     rows = read_dispatch(repo, set(tasks))
     outs = outcomes(rows, tasks, read_feedback(repo), catalog["models"])
@@ -702,10 +1050,12 @@ def route(repo, cfg, tid, tasks, mode="new", live_dids=None, refresh=False, cata
     for ag, n in (extra_running or {}).items():
         ctx["running"][ag] = ctx["running"].get(ag, 0) + n
     cools = read_cooldowns(repo)
+    if quota is None:
+        quota = read_quota(repo, net=jev_net) if quota_cfg(pol)["enabled"] else {}
     caps = rcfg(pol, "max_concurrent") or {}
     minq = (rcfg(pol, "min_quality") or {}).get(str(t.get("layer")))
     pin = (rcfg(pol, "pin") or {}).get(mode) or (rcfg(pol, "pin") or {}).get(str(t.get("layer")))
-    cands, excluded = [], {}
+    cands, excluded, quota_out = [], {}, set()
     for key, m in catalog["models"].items():
         ok, why = availability(key, m, pol, disc)
         if not ok:
@@ -719,28 +1069,47 @@ def route(repo, cfg, tid, tasks, mode="new", live_dids=None, refresh=False, cata
         if minq and float(m.get("quality", 3)) < float(minq):
             excluded[key] = f"min_quality.{t.get('layer')}={minq}"
             continue
+        qx, qadj, qwhy = quota_effect(m, catalog["agents"], quota, pol)
+        if qx:
+            excluded[key] = qx
+            quota_out.add(key)
+            continue
         full = caps.get(ag) is not None and ctx["running"].get(ag, 0) >= int(caps[ag])
         s, why = score(key, m, c, pol, ctx)
+        if qadj:
+            s += qadj
+            why.extend(qwhy)
         if pin == key:
             s += 100
             why.append(f"pin.{mode if (rcfg(pol, 'pin') or {}).get(mode) else t.get('layer')}")
         cands.append((s, key, why, full))
     if not cands:
+        # 쓸 수 있는 구독이 모두 한도 소진이면 기본 에이전트로 띄우지 말고 기다리게 한다
         return {"key": None, "difficulty": c["difficulty"], "tags": c["tags"], "reasons": c["reasons"], "excluded": excluded, "alts": [],
-                "jev": jv}
+                "jev": jv, "quota_blocked": bool(quota_out)}
     open_c = [x for x in cands if not x[3]] or cands      # 모두 상한이면 상한 무시(가장 덜 붐비는 쪽이 점수로 이긴다)
     for x in cands:
         if x[3] and x not in open_c:
             excluded[x[1]] = f"{catalog['models'][x[1]].get('agent')} 동시 상한 {caps.get(catalog['models'][x[1]].get('agent'))}"
-    open_c.sort(key=lambda x: -x[0])
+    def tiekey(x):
+        """점수(부동소수 오차는 같은 점수로) → 부하 적은 구독 → 이 대역 실적 → 소모 적은 쪽 → 품질 → 키 이름."""
+        sc, k, _, _ = x
+        mm = catalog["models"][k]
+        st = ctx["learned"].get((k, band(c["difficulty"])))
+        rate = (st[0] + 2) / (st[1] + 3) if st else 0.67
+        return (-round(sc, 6), ctx["running"].get(mm.get("agent"), 0), -rate, float(mm.get("cost", 3)), -float(mm.get("quality", 3)), k)
+    open_c.sort(key=tiekey)
     s, key, why, _ = open_c[0]
+    if len(open_c) > 1 and round(open_c[1][0], 6) == round(s, 6):
+        why = why + [f"{open_c[1][1]}와 동점 → 부하·실적·소모 순"]
     m = catalog["models"][key]
     eff_d = c["difficulty"] + (0.5 if c["critical"] else 0)   # 임계 경로는 effort도 여유 있게
     effort, model, _want = pick_effort(m, eff_d, ctx["objective"], float(m.get("quality", 3)))
     return {"key": key, "agent": m.get("agent"), "model": model, "effort": effort, "score": round(s, 2),
             "difficulty": c["difficulty"], "tags": c["tags"], "critical": c["critical"], "reasons": c["reasons"],
             "why": why, "alts": [(k, round(sc, 2)) for sc, k, _, _ in open_c[1:5]], "excluded": excluded,
-            "objective": ctx["objective"], "jev": jv, "rule_difficulty": c.get("rule_difficulty")}
+            "objective": ctx["objective"], "jev": jv, "rule_difficulty": c.get("rule_difficulty"),
+            "resolved_from": m.get("resolved_from"), "quality": m.get("quality"), "quality_src": m.get("quality_src")}
 
 
 def describe(dec):

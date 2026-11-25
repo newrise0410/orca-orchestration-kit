@@ -14,15 +14,20 @@ exit 0
 SH
 cat > "$B/codex" <<'SH'
 #!/bin/sh
-echo '{"models":[{"slug":"gpt-6-astra"},{"slug":"gpt-6.1-sol"},{"slug":"gpt-6.1-terra"},{"slug":"gpt-6-luna"},{"slug":"gpt-9-new"}]}'
+echo '{"models":[{"slug":"gpt-6-astra"},{"slug":"gpt-6.1-sol"},{"slug":"gpt-6.2-sol"},{"slug":"gpt-6.1-terra"},{"slug":"gpt-6-luna"},{"slug":"gpt-9-new"}]}'
 SH
 cat > "$B/agy" <<'SH'
 #!/bin/sh
-printf 'gemini-3.8-flash-low\tL\ngemini-3.8-flash-medium\tM\ngemini-3.8-flash-high\tH\nclaude-opus-4-6-thinking\tO\n'
+printf 'gemini-4-neon-low\tL\ngemini-4-neon-medium\tM\ngemini-4-neon-high\tH\ngemini-4-neon-xhigh\tX\ngemini-4-carbon-low\tL\ngemini-4-carbon-medium\tM\ngemini-4-carbon-high\tH\ngemini-3.8-flash-low\tF\nclaude-opus-5-5-medium\tO\n'
 SH
 cat > "$B/grok" <<'SH'
 #!/bin/sh
-echo "Available models:"; echo "  * grok-4.7 (default)"; echo "  - grok-4.7-build-fast"
+V="$(dirname "$0")/grok.ver"
+case "$1" in
+  --version) echo "grok $(cat "$V" 2>/dev/null || echo 1.0.0) (abc) [stable]" ;;
+  update) echo "updated"; echo 1.0.1 > "$V" ;;
+  *) echo "Available models:"; echo "  * grok-4.7 (default)"; echo "  - grok-4.7-build-fast"; echo "  - grok-4.6" ;;
+esac
 SH
 chmod +x "$B"/*; export PATH="$B:$PATH" KIT_ORCA_HOME="$W/orca-home"
 pass=0; fail=0
@@ -171,11 +176,12 @@ cd "$R"
 M="python3 $T/models.py"
 first() { head -1 <<<"$1"; }
 o=$($M discover 2>&1)
-check "discover: CLI 모델 목록 읽음" bash -c 'grep -q "codex: 모델 5개" <<<"$0" && grep -q "✓ codex-sol" <<<"$0"' "$o"
+check "discover: CLI 모델 목록 읽음" bash -c 'grep -q "codex: 모델 6개" <<<"$0" && grep -q "✓ codex-sol" <<<"$0"' "$o"
+check "discover: 계열의 가장 높은 판(gpt-6.2-sol)·옛 판은 알림에서 뺌" bash -c 'grep -q "codex-sol .*gpt-6.2-sol .*계열 gpt-{v}-sol → 6.2판, 카탈로그 gpt-6.1-sol" <<<"$0" && grep -q "옛 판" <<<"$0" && ! grep -q "grok-4.6" <<<"$0"' "$o"
 check "discover: 카탈로그에 없는 모델 알림" has "$o" "gpt-9-new"
 check "캐시는 .gitignore" grep -q 'models_cache.json' .gitignore
-o=$($M route S-01 2>&1)
-check "체계 통합(S-01)은 품질 4 이상" bash -c 'grep -Eq "^\[S-01\] (claude-opus|claude-fable|codex-astra|claude-sonnet|codex-sol|grok|agy-claude-opus) " <<<"$0"' "$o"
+o=$($M route --json S-01 2>/dev/null)
+check "체계 통합(S-01)은 품질 4 이상" python3 -c "import json,sys;d=json.loads(sys.argv[1]);sys.exit(0 if d['quality']>=4 else 1)" "$o"
 cat >> orchestration/tasks.yaml <<'YAML'
 
 - id: X-DOC
@@ -202,11 +208,20 @@ cat >> orchestration/tasks.yaml <<'YAML'
   status: todo
 YAML
 o=$($M route X-DOC 2>&1)
-check "쉬운 작업은 저가 모델(cost 1)" bash -c 'grep -Eq "^\[X-DOC\] (claude-haiku|codex-luna|agy-gemini-flash|grok-fast) " <<<"$0"' "$o"
+check "쉬운 작업은 저가 모델(cost 1)" bash -c 'grep -Eq "^\[X-DOC\] (claude-haiku|codex-luna|agy-gemini-carbon) " <<<"$0"' "$o"
 check "근거 출력(난이도·선택·다음 후보)" bash -c 'grep -q "난이도 근거" <<<"$0" && grep -q "다음 후보" <<<"$0"' "$o"
 check "validate_dag: 잘못된 difficulty 경고" bash -c "python3 $T/validate_dag.py 2>&1 | grep -q 'X-PIN: difficulty'"
 o=$(KIT_RUN=run_x $T/launch.sh --dry-run X-PIN 2>&1)
-check "route: 고정 → codex gpt-6.1-sol" bash -c 'grep -q "route: codex-sol" <<<"$0" && grep -q -- "--agent codex --model gpt-6.1-sol" <<<"$0"' "$o"
+check "route: 고정 → codex 계열 최신 gpt-6.2-sol" bash -c 'grep -q "route: codex-sol" <<<"$0" && grep -q -- "--agent codex --model gpt-6.2-sol" <<<"$0"' "$o"
+check "계열: models.yaml이 model을 정하면 따라가지 않음 · {effort} 계열은 판별 ID" python3 -c "
+import sys, yaml, tempfile; sys.path.insert(0,'$T'); import routing
+f=tempfile.NamedTemporaryFile('w',suffix='.yaml',delete=False); yaml.safe_dump({'models':{'codex-sol':{'model':'gpt-6.1-sol'}}},f); f.close()
+cat,_=routing.load('.',policy_path=f.name)
+disc={'codex':{'models':['gpt-6.1-sol','gpt-6.2-sol']},'antigravity':{'models':['gemini-4-neon-low','gemini-4-neon-high','gemini-5-neon-low','gemini-5-neon-medium']}}
+r=routing.resolve_catalog(cat,disc)['models']
+assert r['codex-sol']['model']=='gpt-6.1-sol', r['codex-sol']
+n=r['agy-gemini-neon']; assert n['model']=='gemini-5-neon-medium' and n['model_by_effort']=={'low':'gemini-5-neon-low','medium':'gemini-5-neon-medium'}, n
+assert routing.vkey('5-5')==(5,5) and routing.family_regex('claude-opus-{v}-{effort}').match('claude-opus-5-5-high')"
 o=$(KIT_RUN=run_x $T/launch.sh --dry-run --explain X-DOC 2>&1)
 check "launch: 라우팅 결과로 --agent/--model" bash -c 'grep -q "라우팅: " <<<"$0" && grep -q "선택 근거" <<<"$0" && grep -Eq -- "--agent (claude|codex|antigravity|grok) --model" <<<"$0"' "$o"
 o=$(KIT_RUN=run_x $T/launch.sh --dry-run --no-route X-DOC 2>&1)
@@ -255,7 +270,7 @@ sed -i 's/^  agents: .*/  agents: [claude, codex, antigravity, grok]/' orchestra
 # snap 격리 설치본(/snap/bin/x → /usr/bin/snap)은 워커로 못 쓴다: worker_done·ask를 보낼 orca CLI를 실행하지 못한다
 mkdir -p "$W/fake/usr/bin" "$W/bin2"; cp "$W/bin/agy" "$W/fake/usr/bin/snap"; ln -sf "$W/fake/usr/bin/snap" "$W/bin2/agy"
 o=$(PATH="$W/bin2:$PATH" $M discover 2>&1)
-check "snap 격리 agy는 제외" bash -c 'grep -q "snap 격리" <<<"$0" && grep -q "✗ agy-gemini-flash" <<<"$0"' "$o"
+check "snap 격리 agy는 제외" bash -c 'grep -q "snap 격리" <<<"$0" && grep -q "✗ agy-gemini-neon" <<<"$0"' "$o"
 $M discover >/dev/null 2>&1
 # Orca에서 꺼진 에이전트(agent_unconfigured)는 쿨다운하고 다시 라우팅한다
 cat > "$W/fake-orca" <<'SH'
@@ -270,9 +285,103 @@ esac
 SH
 chmod +x "$W/fake-orca"
 first_ag=$($M route --json X-DOC | python3 -c 'import sys,json; print(json.load(sys.stdin)["agent"])')
+rm -f orchestration/state/cli_update.json
 o=$(FAKE_DISABLED=$first_ag ORCA_CLI_COMMAND="$W/fake-orca" KIT_RUN=run_x $T/launch.sh X-DOC 2>&1)
+check "launch: 하루 한 번 구독 CLI 업데이트 뒤 투입" bash -c 'grep -q "구독 CLI 업데이트" <<<"$0" && python3 -c "import sys;sys.path.insert(0,\"$1\");import routing;c,p=routing.load(\".\");sys.exit(1 if routing.update_due(\".\",p) else 0)"' "$o" "$T"
 check "꺼진 에이전트 → 쿨다운 후 다른 구독으로 투입" bash -c 'grep -q "다시 라우팅" <<<"$0" && grep -q "ctx_def456" <<<"$0" && grep -q "\"$1\"" orchestration/state/cooldown.json && ! tail -1 orchestration/state/dispatch.tsv | grep -q "	$1	"' "$o" "$first_ag"
 
+check "동점: 부동소수 오차 무시 · 부하 → 소모 순으로 가림 · 임계 경로도 같은 대역 실적" python3 -c "
+import sys; sys.path.insert(0,'$T'); import routing
+cat,pol=routing.load('.'); cat=routing.apply_bench(cat)
+c={'difficulty':3.0,'tags':['coding'],'critical':True,'reasons':[]}
+ctx={'objective':'balanced','learned':{('codex-sol','mid'):(3.0,3)},'running':{},'usage':{},'failed':set(),'avoid_agent':None}
+s,why=routing.score('codex-sol',cat['models']['codex-sol'],c,pol,ctx)
+assert any(w.startswith('실적 3.0/3') for w in why), why
+a=(0.35000000000000001,'b-key',[],False); b=(0.35,'a-key',[],False)
+assert round(a[0],6)==round(b[0],6)"
+# 구독 CLI 업데이트: 자체 update 명령 → 버전 기록 → 모델 목록 다시 읽기. snap 설치본은 건너뛴다. launch.sh는 하루 한 번
+rm -f "$W/bin/grok.ver"
+o=$($M update grok 2>&1)
+check "update: grok 1.0.0 → 1.0.1 · 기록 · 카탈로그 대조" bash -c 'grep -q "grok: 갱신 1.0.0 → 1.0.1" <<<"$0" && grep -q "\"after\": \"1.0.1\"" orchestration/state/cli_update.json && grep -q "# 카탈로그 모델" <<<"$0"' "$o"
+o=$($M update --check grok 2>&1)
+check "update --check: 업데이트하지 않음" bash -c 'grep -q "grok: 확인 1.0.1" <<<"$0"' "$o"
+o=$(PATH="$W/bin2:$PATH" $M update antigravity 2>&1)
+check "update: snap 설치본은 건너뜀" has "$o" "antigravity: 건너뜀"
+# 잔여 한도: Orca rateLimits(orca account list --json). 소진은 초기화까지 제외, 빠듯하면 벌점, 묶음·모델별 창, 숫자만 캐시
+cat > "$W/fake-orca-quota.py" <<'PY'
+import json, os, sys, time
+now = time.time() * 1000; h = 3600 * 1000
+full = os.environ.get("FAKE_QUOTA") == "full"
+def w(used, mins, resets_h): return {"usedPercent": used, "windowMinutes": mins, "resetsAt": now + resets_h * h}
+rl = {"claude": {"provider": "claude", "status": "ok", "planType": "max", "weekly": w(100 if full else 20, 10080, 100), "fableWeekly": w(99, 10080, 100)},
+      "codex": {"provider": "codex", "status": "ok", "session": w(100, 300, 2), "weekly": w(40, 10080, 120)},
+      "antigravity": {"provider": "antigravity", "status": "ok", "session": w(100 if full else 90, 300, 3), "weekly": w(30, 10080, 160),
+                      "buckets": [{"group": "Gemini Models", **w(100 if full else 90, 300, 3)}, {"group": "Gemini Models", **w(30, 10080, 160)},
+                                  {"group": "Claude and GPT models", **w(100 if full else 0, 300, 3)}]},
+      "grok": {"provider": "grok", "status": "ok", "weekly": w(100 if full else 10, 10080, 10)},
+      "inactiveCodexAccounts": [{"rateLimits": {"provider": "codex", "status": "ok", "session": w(0, 300, 5)}}]}
+if sys.argv[1:4] == ["account", "list", "--json"]:
+    print(json.dumps({"ok": True, "result": {"claude": {"accounts": [{"email": "someone@example.invalid"}]}, "rateLimits": rl}}))
+else:
+    print('{"ok":false}'); sys.exit(1)
+PY
+printf '#!/bin/sh\nexec python3 %s "$@"\n' "$W/fake-orca-quota.py" > "$W/fake-orca-q"; chmod +x "$W/fake-orca-q"
+rm -f orchestration/state/quota_cache.json
+o=$(ORCA_CLI_COMMAND="$W/fake-orca-q" $M quota 2>&1)
+check "quota: 소진 제외(초기화 시각·다른 계정 힌트) · 묶음·Fable 주간 · 세션 벌점 · 곧 초기화 가점" bash -c 'grep -q "codex-sol .*제외: codex 세션 한도 100% 소진 (.* 초기화) · 다른 codex 계정은 여유" <<<"$0" && grep -q "claude-fable .*제외: claude Fable 주간" <<<"$0" && ! grep -q "claude-opus .*제외" <<<"$0" && grep -q "agy-gemini-neon .*-" <<<"$0" && ! grep -q "agy-claude-opus" <<<"$0" && grep -q "grok .*+0.50 (주간 90% 남고" <<<"$0"' "$o"
+check "quota 캐시: 숫자만(계정 이메일 없음)" bash -c 'test -f orchestration/state/quota_cache.json && ! grep -q "@" orchestration/state/quota_cache.json'
+python3 $T/dashboard/build.py --out $W/dash-q.html >/dev/null 2>&1
+check "대시보드: 구독 칩에 잔여 한도(캐시) · 소진 구독은 쿨다운 칩" bash -c 'grep -q "Grok <b>0/2</b> <span class=\"muted small\">주 10%" $0 && grep -q "Codex <span class=\"small\">한도 소진 · " $0' "$W/dash-q.html"
+o=$($M route --json X-DOC 2>/dev/null)
+check "route: 캐시된 한도로 소진 구독 제외" python3 -c "import json,sys;d=json.loads(sys.argv[1]);sys.exit(0 if d['agent']!='codex' and any('한도' in v for v in d['excluded'].values()) else 1)" "$o"
+rm -f orchestration/state/quota_cache.json
+o=$(FAKE_QUOTA=full ORCA_CLI_COMMAND="$W/fake-orca-q" KIT_RUN=run_x $T/launch.sh --dry-run --force X-DOC 2>&1)
+check "launch: 모든 구독 한도 소진이면 기본 에이전트로 띄우지 않고 보류" bash -c 'grep -q "보류: 후보 없음" <<<"$0" && grep -q "한도가 모두 찼다" <<<"$0" && ! grep -q "worker-start" <<<"$0"' "$o"
+rm -f orchestration/state/quota_cache.json
+# 공개 벤치마크 → 품질: Terminal-Bench 페이지(이스케이프된 리더보드 JSON)에서 카탈로그에 맞는 줄만, 다른 CLI 점수는 빌리지 않는다
+python3 - "$W/tb.html" <<'PY'
+import json, sys
+rows = [("Claude Code", "Opus 5.5", "max", 66.0), ("Codex", "GPT-6.1 Sol", "max", 60.0), ("Codex", "GPT-6 Luna", "max", 15.0),
+        ("Antigravity CLI", "Gemini 4 Neon", "xhigh", 61.0), ("Codex", "GPT-6 Astra", "high", 59.0), ("Codex", "GPT-6 Astra", "low", 50.0),
+        ("GitHub Copilot", "Copilot Fusion", "max", 71.0)]
+items = [{"id": f"r{i}", "rank": i + 1, "metadata": {"date": "2026-11-01", "agent_display": {"url": "u", "label": a},
+          "model_display": {"url": "u", "label": m}, "reasoning_effort": e},
+          "metrics": {"accuracy": acc, "n_trials": 10, "output_tokens": 1000000, "avg_trial_duration_sec": 600, "accuracy_ci95_half_width": 3}}
+         for i, (a, m, e, acc) in enumerate(rows)]
+blob = json.dumps({"lb": {"name": "4-1-0", "title": "Terminal-Bench 4.1"}, "entries": items}, separators=(",", ":"))
+open(sys.argv[1], "w").write('<html><script>self.__next_f.push([1,"' + blob.replace('"', '\\"') + '"])</script></html>')
+PY
+o=$($M bench --tb-file "$W/tb.html" 2>&1)
+check "bench: 카탈로그에 맞는 줄만 · 옛 판 · 다른 CLI 안 빌림" bash -c 'grep -q "전체 7줄 중 카탈로그에 맞는 6줄" <<<"$0" && grep -Eq "^codex-sol .*GPT-6.1 Sol max 60.0% \(옛 판\)" <<<"$0" && grep -Eq "^agy-claude-opus .*카탈로그 추정" <<<"$0" && grep -Eq "^claude-opus .* 5.0 " <<<"$0" && test -f orchestration/state/bench_scores.yaml' "$o"
+o=$($M discover 2>&1)
+check "discover: 품질 근거·벤치 출처 표시" bash -c 'grep -q "품질 근거: Terminal-Bench 4.1" <<<"$0" && grep -q "벤치 점수: Terminal-Bench 4.1 .*state/bench_scores.yaml" <<<"$0"' "$o"
+check "models.yaml quality는 벤치로 바꾸지 않음" python3 -c "
+import sys, yaml, tempfile; sys.path.insert(0,'$T'); import routing
+f=tempfile.NamedTemporaryFile('w',suffix='.yaml',delete=False); yaml.safe_dump({'models':{'codex-luna':{'quality':3}}},f); f.close()
+cat,_=routing.load('.',policy_path=f.name); r=routing.apply_bench(cat)['models']
+assert r['codex-luna']['quality']==3 and r['codex-luna']['quality_src']=='models.yaml', r['codex-luna']
+assert r['codex-astra']['quality']==round(5*59/66,1), r['codex-astra']"
+printf '<html>nothing</html>' > "$W/tb-bad.html"
+check "bench: 꼴이 바뀐 페이지는 실패로 알림" bash -c "! $M bench --tb-file $W/tb-bad.html --dry-run 2>&1 | grep -q '→'"
+cat > "$W/fake-aa.py" <<'PY'
+import http.server, json, sys
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        ok = self.headers.get("x-api-key") == "aa-key"
+        out = {"tier": "free", "data": [{"name": "Gemini 4 Neon (Xhigh)", "slug": "gemini-4-neon", "evaluations": {"artificial_analysis_intelligence_index": 55.0},
+               "performance_v3": {"mean_output_tokens_per_second": 120.0}}, {"name": "Other Model", "slug": "x", "evaluations": {}}], "pagination": {}} if ok else {"error": "auth"}
+        self.send_response(200 if ok else 401); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(json.dumps(out).encode())
+    def log_message(self, *a): pass
+http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
+PY
+AP=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1])')
+python3 "$W/fake-aa.py" "$AP" & apid=$!; sleep 0.5
+o=$(KIT_AA_URL="http://127.0.0.1:$AP/free" AA_API_KEY=aa-key $M bench --tb-file "$W/tb.html" --aa 2>&1)
+check "bench --aa: 무료 API(키)로 지능 지수·속도 기록, 카탈로그 밖 모델은 뺌" bash -c 'grep -q "AA 1개" <<<"$0" && grep -q "intelligence: 55" orchestration/state/bench_scores.yaml && grep -q "artificialanalysis.ai" orchestration/state/bench_scores.yaml' "$o"
+o=$($M bench --tb-file "$W/tb.html" --aa 2>&1)
+check "bench --aa: 키 없으면 건너뜀" has "$o" "AA_API_KEY가 없어"
+kill $apid 2>/dev/null; wait $apid 2>/dev/null
+rm -f orchestration/state/bench_scores.yaml
 # JEV(선택, 기본 꺼짐): 꺼져 있으면 부르지 않는다. 켜면 shadow는 기록만, live는 신뢰도 기준 이상일 때 난이도를 바꾼다.
 cat > "$W/fake-jev.py" <<'PY'
 import http.server, json, sys

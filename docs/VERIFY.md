@@ -170,3 +170,15 @@ kit.py bootstrap --target <tmp>/empty --dry-run
 - 회귀 시험 89/89: 기존 83 + 6(초안의 순서와 hold, 기획이 보류면 투입 가능 작업 없음, `F-00a`는 hold라 투입 보류, `F-01`은 조사 전 선행 미완료로 보류, `F-00b`가 조사 태그로 분류됨, tasks.yaml에 YAML 앵커 없음). 보관 시험의 merged 수는 4 → 6으로 고쳤다.
 - 시험이 잡은 결함: 두 작업이 같은 목록 객체를 쓰기 범위로 함께 써서 tasks.yaml에 YAML 앵커(`&id001`)가 찍혔고 `archive_tasks.py`가 작업을 하나씩 읽다가 실패했다. 작업마다 목록을 복사해 넣게 고치고 앵커 검사를 시험에 넣었다.
 - 하지 않은 것: 예제(`examples/demo-project`)는 자체 tasks.yaml을 덮어쓰는 구성이라 그대로 뒀다(기획 단계가 없는 축약 예제다). 기존 설치본의 tasks.yaml은 seed라 upgrade로 바뀌지 않는다. 실제 Orca에서 `F-00a` → `F-00b` → `F-01`을 차례로 투입해 보지는 않았다.
+
+## 15. v0.7.0: 벤치마크 품질·잔여 한도·구독 CLI 자동 업데이트·카탈로그 계열 (2026-11-25)
+
+| 항목 | 결과 |
+|---|---|
+| `tests/smoke.sh` | 107/107 통과(KIT-09까지 89 + 이번 18). 동점 규칙·임계 경로 실적 대역 추가. 벤치·한도 추가분: Terminal-Bench 줄 고르기(옛 판·다른 CLI 안 빌림)·models.yaml 품질 고정·꼴이 바뀐 페이지 실패·AA 무료 API(가짜 서버)·키 없으면 건너뜀, 한도 소진 제외(초기화 시각·다른 계정 알림)·Fable 주간은 Fable에만·Antigravity 묶음·세션 벌점·곧 초기화 가점·캐시에 이메일 없음·모두 소진이면 launch 보류·대시보드 칩. 그 밖의 v0.7 추가분: 추가: 계열의 가장 높은 판(gpt-6.2-sol)·옛 판 알림 제외, route: 고정도 계열 판, models.yaml model 지정 시 고정, `{effort}` 계열 재구성·`5-5` 판 읽기, `update` 판 기록·`--check`·snap 건너뜀, launch.sh 하루 한 번 업데이트 |
+| 실제 CLI (이 머신) | `models.py update`: claude 2.1.331 최신, codex 0.169.0 → 0.172.0, agy 1.5.16 최신, grok 1.0.92 최신 (14초). 입력 없이 끝났다 |
+| 실제 계열 판 | codex-astra → gpt-6.2-astra, codex-sol → gpt-6.2-sol, terra 6.1, luna 6, agy neon·carbon 4, agy claude-opus 5-5, grok 4.7. 새 계열 알림: codex-auto-review·gpt-reserve, Antigravity argon·hydrogen·claude-sonnet 등, grok-4.7-build-fast |
+| Antigravity | snap 커뮤니티 포장본(1.4.12) 대신 공식 설치 스크립트를 읽고 실행 → `~/.local/bin/agy` 1.5.16(sha512 검증, 자체 업데이트). PATH에서 snap보다 앞선다 |
+| Terminal-Bench 4.1 실데이터 | 리더보드 67줄 중 카탈로그에 맞는 36줄. 품질(5 × 해결률/최고): fable·opus 5.0, sonnet 4.9, carbon 4.9, astra·sol·neon 4.7, terra 4.1, haiku 3.0, grok 2.9, luna 1.2. agy-claude-opus는 벤치 없음(카탈로그 4) |
+| 잔여 한도 실데이터 | Orca rateLimits: claude 주간 30%·Fable 주간 26%, codex 세션 100%(초기화 시각까지 제외, 다른 계정 여유 알림)·주간 48%, antigravity Gemini 묶음 세션 90%·주간 38%(벌점 −2.7), Claude and GPT 묶음 0%, grok 주간 0%. 캐시 파일에 이메일 없음 확인 |
+| 실제 결정 | 데모 F-01(계약·임계 경로) → claude-sonnet high, S-01(체계 통합) → claude-opus high. codex는 세션 소진으로 제외 |

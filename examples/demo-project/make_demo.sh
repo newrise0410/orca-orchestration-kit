@@ -43,7 +43,7 @@ import json, sys, time, datetime as dt
 d = sys.argv[1]
 agents = {"claude": {"bin": "/usr/local/bin/claude", "models": None, "error": None, "confined": False},
           "codex": {"bin": "/usr/local/bin/codex", "models": ["gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna"], "error": None, "confined": False},
-          "antigravity": {"bin": "/snap/bin/agy", "models": ["gemini-3.8-flash-low", "gemini-3.8-flash-medium", "gemini-3.8-flash-high"], "error": None, "confined": True},
+          "antigravity": {"bin": "/snap/bin/agy", "models": ["gemini-4-neon-low", "gemini-4-neon-medium", "gemini-4-neon-high", "gemini-4-neon-xhigh", "gemini-4-carbon-low", "gemini-4-carbon-medium", "gemini-4-carbon-high"], "error": None, "confined": True},
           "grok": {"bin": "/usr/local/bin/grok", "models": ["grok-4.7", "grok-4.7-build-fast"], "error": None, "confined": False}}
 json.dump({"v": 2, "ts": time.time(), "agents": agents}, open(f"{d}/models_cache.json", "w"), indent=1)
 json.dump({"grok": {"until": time.time() + 23 * 3600, "reason": "Orca에서 꺼진 에이전트"}}, open(f"{d}/cooldown.json", "w"), indent=1)

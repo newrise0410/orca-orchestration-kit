@@ -33,6 +33,8 @@ orchestration/templates/integration-spec.md
 orchestration/templates/review-spec.md
 orchestration/templates/worker-spec.md
 orchestration/tools/archive_tasks.py
+orchestration/tools/bench.py
+orchestration/tools/bench_scores.yaml
 orchestration/tools/cleanup_worker.sh
 orchestration/tools/dashboard/build.py
 orchestration/tools/dashboard/dashboard.example.yaml
