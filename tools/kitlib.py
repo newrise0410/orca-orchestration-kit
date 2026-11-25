@@ -2,6 +2,7 @@
 
 표준 라이브러리 + PyYAML만 쓴다. 설치 위치는 <저장소>/orchestration/tools/ 이다.
 """
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -24,6 +25,17 @@ def workspace_path(v):
         v = v.get("path") or v.get("worktreePath") or ""
     v = str(v or "")
     return v.split("::", 1)[1] if "::" in v else v
+
+
+def msg_payload(m):
+    """Orca 메일의 payload → dict. --full로 읽으면 JSON 문자열로 온다(현장 확인)."""
+    pl = (m or {}).get("payload")
+    if isinstance(pl, str):
+        try:
+            pl = json.loads(pl)
+        except ValueError:
+            return {}
+    return pl if isinstance(pl, dict) else {}
 
 
 SETTLED_WORKER_STATES = {"succeeded", "failed", "abandoned", "stopped", "cancelled", "canceled"}
