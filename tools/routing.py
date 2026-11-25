@@ -443,6 +443,18 @@ def read_switches(repo):
     return out
 
 
+def read_filter_blocks(repo):
+    """{작업 ID: {카탈로그 키}} — 그 작업에서 안전 필터로 끊긴 모델(quota_switch.tsv 9번째 칸 filter). 그 작업의 후보에서 뺀다."""
+    p = state_dir(repo) / "quota_switch.tsv"
+    out = {}
+    if p.is_file():
+        for ln in p.read_text(encoding="utf-8").splitlines():
+            c = ln.split("\t")
+            if len(c) >= 9 and c[8] == "filter" and c[4]:
+                out.setdefault(c[1], set()).add(c[4])
+    return out
+
+
 def read_feedback(repo):
     p = state_dir(repo) / "route_feedback.tsv"
     out = []
@@ -1086,7 +1098,7 @@ def score(key, m, c, pol, ctx):
 
 
 def route(repo, cfg, tid, tasks, mode="new", live_dids=None, refresh=False, catalog=None, pol=None, disc=None,
-          extra_running=None, jev_net=True, quota=None, need_minutes=None, exclude_agents=None):
+          extra_running=None, jev_net=True, quota=None, need_minutes=None, exclude_agents=None, exclude_keys=None):
     """작업 하나의 결정. 반환: {key, agent, model, effort, difficulty, tags, reasons, why, alts, excluded}.
     후보가 없으면 key가 None. extra_running: 이번 호출에서 방금 띄운(아직 집계에 없는) 에이전트별 수.
     need_minutes: 한도 전환(quota_switch)일 때 넘겨받을 구독에 필요한 여유 시간 — 곧 다시 찰 후보를 뺀다(headroom).
@@ -1118,6 +1130,7 @@ def route(repo, cfg, tid, tasks, mode="new", live_dids=None, refresh=False, cata
     minq = (rcfg(pol, "min_quality") or {}).get(str(t.get("layer")))
     pin = (rcfg(pol, "pin") or {}).get(mode) or (rcfg(pol, "pin") or {}).get(str(t.get("layer")))
     cands, excluded, quota_out = [], {}, set()
+    fblock = read_filter_blocks(repo).get(tid, set()) | set(exclude_keys or ())
     for key, m in catalog["models"].items():
         ok, why = availability(key, m, pol, disc)
         if not ok:
@@ -1133,6 +1146,9 @@ def route(repo, cfg, tid, tasks, mode="new", live_dids=None, refresh=False, cata
             continue
         if ag in (exclude_agents or ()):
             excluded[key] = f"검토 독립성: {ag}가 구현했다"
+            continue
+        if key in fblock:
+            excluded[key] = "이 작업에서 안전 필터로 끊긴 모델"
             continue
         qx, qadj, qwhy = quota_effect(m, catalog["agents"], quota, pol)
         if not qx and need_minutes is not None:

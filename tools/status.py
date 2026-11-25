@@ -8,8 +8,11 @@
 정지 점검 판정 (한 줄씩, 이상이 없으면 '정상'):
   한도 정지   워커가 도는 구독(그 모델의 창)이 사용량 한도 100% → quota_switch.py (자동 전환, 곧 풀리면 대기)
   한도 풀림   대기로 둔 워커의 한도가 풀렸다 → quota_switch.py가 '이어서 하라'를 보낸다
+  필터 중단   워커의 마지막 응답이 안전 필터·이용 정책 차단으로 끊겼다(살아 있어 보여도 일하지 않는다)
+              → quota_switch.py (진행분 보존 → 다른 구독으로 이어받기, 그 모델은 이 작업 후보에서 뺀다)
   attention   Orca가 워커에 주의 표시(입력 대기 프롬프트 등) → worker-show / worker-read로 원인 확인
-  커밋 없음    진행 중인데 마지막 커밋이 stale-min보다 오래됨 → worker-read로 화면 끝 확인
+  커밋 없음    진행 중인데 마지막 커밋과 이 투입의 시작 중 늦은 쪽이 stale-min보다 오래됨 → worker-read로 화면 끝 확인
+              (보완 워커가 앞 차수와 같은 브랜치를 쓰면 앞 차수 커밋이 마지막 커밋이라, 투입 시각이 더 늦으면 그것을 기준으로 잰다)
   running 고아 tasks.yaml은 running인데 진행 중 워커가 없음 → 끝났으면 review/merged, 멈췄으면 재투입
   할당 누락    진행 중 워커 0이고 투입 가능 작업이 있음 → launch.sh (일부러 미룬 작업은 tasks.yaml에 hold: <사유>)
   대기할 것 없음 진행 중 0 · 투입 가능 0 · 미답 질문 0 → 다음 작업을 DAG에 넣거나 종료
@@ -140,9 +143,13 @@ def collect(repo, cfg, a):
             w["model"] = (r.get("key") or r.get("model") or "") if r else ""
             w["agent"], w["key"], w["mode"] = r.get("agent", ""), r.get("key", ""), r.get("mode", "")
             w["model_id"] = r.get("model", "")
+            w["started"] = started_ts(r.get("ts"))
             if r.get("agent"):
                 by[r["agent"]] = by.get(r["agent"], 0) + 1
         out["quota_stalls"] = quota_stalls(repo, catalog, pol, o["workers"])
+        qd = {q["dispatch"] for q in out["quota_stalls"]}
+        out["turn_stops"] = [] if getattr(a, "no_read", False) else [
+            dict(w, **ts) for w in o["workers"] if w["dispatch"] not in qd for ts in [turn_stop(w["dispatch"])] if ts]
         try:
             out["quota_waits"] = json.loads((routing.state_dir(repo) / "quota_wait.json").read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -152,6 +159,47 @@ def collect(repo, cfg, a):
     except Exception as e:  # noqa: BLE001 — 현황은 라우팅 설정이 깨져도 나와야 한다
         out["models"] = {"error": str(e)[:160]}
     return out
+
+
+# 안전 필터·이용 정책 차단 문구(CLI마다 다르다). 워커의 마지막 응답(assistant 글·오류 블록)에서만 찾는다.
+# 도구 결과(읽은 파일·시험 출력)는 보지 않는다: 검토 대상 문서에 이 말이 있어도 오탐하지 않게.
+FILTER_PATTERNS = [
+    r"usage polic(?:y|ies)",
+    r"content (?:polic(?:y|ies)|filter(?:ing)?)",
+    r"(?:prompt|request|content|response|input|output|message)s? (?:was|were|has been|is|are) (?:flagged|blocked|filtered)",
+    r"flagged as (?:potentially )?(?:violating|unsafe|harmful)",
+    r"blocked (?:due to|by|for) (?:safety|the safety|content|polic)",
+    r"finish_?reason\W{0,4}(?:safety|content_filter|recitation|prohibited_content)",
+    r"(?:cyber ?security|safety) polic(?:y|ies)",
+    r"invalid_prompt",
+]
+FILTER_RX = re.compile("|".join(FILTER_PATTERNS), re.I)
+
+
+def turn_stop(did, tail=2):
+    """워커 마지막 응답의 중단 사유 → {'kind': 'filter', 'evidence': 줄} | None. 읽을 수 없으면 None."""
+    d = orca_json(["orchestration", "worker-read", "--dispatch", did, "--limit", "8"])
+    msgs = (((d.get("result") or {}).get("transcript") or {}).get("messages") or []) if d.get("ok") else []
+    texts = []
+    for m in [x for x in msgs if x.get("role") != "tool"][-tail:]:
+        for b in m.get("blocks") or []:
+            if b.get("type") in ("text", "error", "notice", "status") or "error" in str(b.get("type", "")):
+                texts.append(str(b.get("text") or b.get("message") or b.get("error") or ""))
+        if m.get("error"):
+            texts.append(str(m.get("error")))
+    for t in texts:
+        for ln in t.splitlines():
+            if FILTER_RX.search(ln):
+                return {"kind": "filter", "evidence": " ".join(ln.split())[:160]}
+    return None
+
+
+def started_ts(ts):
+    """dispatch.tsv의 투입 시각('YYYY-MM-DD HH:MM:SS', 로컬) → epoch | None."""
+    try:
+        return dt.datetime.strptime(str(ts), "%Y-%m-%d %H:%M:%S").timestamp()
+    except (TypeError, ValueError):
+        return None
 
 
 def quota_stalls(repo, catalog, pol, workers, quota=None):
@@ -187,7 +235,11 @@ def stall_lines(s, stale_min):
     qs = {q["dispatch"]: q for q in s.get("quota_stalls") or []}
     for w in o["workers"]:
         who = f"{w['kit_id'] or w['title'] or '?'} ({w['dispatch']})"
-        if w["dispatch"] in qs:
+        ts_ = {x["dispatch"]: x for x in s.get("turn_stops") or []}.get(w["dispatch"])
+        if ts_:
+            lines.append(f"필터 중단 {who}: \"{ts_['evidence']}\" · {w.get('model') or w.get('agent') or '?'} → "
+                         "python3 orchestration/tools/quota_switch.py (다른 구독으로 이어받기, 이 모델은 이 작업 후보에서 뺀다)")
+        elif w["dispatch"] in qs:
             q = qs[w["dispatch"]]
             win = ", ".join(f"{lab} {u:.0f}%" + (f"({routing._hm(r)} 초기화)" if r else "") for lab, u, r in q["windows"])
             wt = (s.get("quota_waits") or {}).get(w["dispatch"])
@@ -196,8 +248,9 @@ def stall_lines(s, stale_min):
                             else "python3 orchestration/tools/quota_switch.py (자동 전환, 곧 풀리면 대기)"))
         elif w["attention"]:
             lines.append(f"attention {who}: {', '.join(map(str, w['attention']))} → worker-show/worker-read")
-        elif w["last_commit"] and now - w["last_commit"] > stale_min * 60:
-            lines.append(f"커밋 없음 {who}: 마지막 커밋 {ago(w['last_commit'])} → worker-read로 화면 끝 확인")
+        elif w["last_commit"] and now - max(w["last_commit"], w.get("started") or 0) > stale_min * 60:
+            lines.append(f"커밋 없음 {who}: 마지막 커밋 {ago(w['last_commit'])}"
+                         + (f" · 투입 {ago(w['started'])}" if w.get("started") else "") + " → worker-read로 화면 끝 확인")
     live_d = {w["dispatch"] for w in o["workers"]}
     for did, wt in (s.get("quota_waits") or {}).items():
         if wt.get("resets") and wt["resets"] <= now and did in live_d and did not in qs:
@@ -270,6 +323,7 @@ def main(argv=None):
     ap.add_argument("--limit", type=int, default=10)
     ap.add_argument("--stale-min", dest="stale_min", type=int, default=60)
     ap.add_argument("--no-orca", dest="no_orca", action="store_true")
+    ap.add_argument("--no-read", dest="no_read", action="store_true", help="워커 마지막 응답을 읽지 않는다(필터 중단 판정 생략)")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
     repo = kitlib.repo_root(a.repo)
