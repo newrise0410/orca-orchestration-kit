@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""한도 전환: 사용량 한도가 찬 구독에서 멈춘 워커를 다른 구독으로 이어받게 한다 (매니저가 손으로 하던 절차).
+"""한도 전환: 사용량 한도가 찬 구독에서 멈춘 워커(또는 안전 필터로 턴이 끊긴 워커)를 다른 구독으로 이어받게 한다
+(매니저가 손으로 하던 절차).
 
   python3 orchestration/tools/quota_switch.py [--dry-run] [작업ID ...]   # 인자가 없으면 정지 점검의 '한도 정지' 전부
 
@@ -11,7 +12,10 @@
          이어받기 투입(라우팅이 한도 찬 모델을 빼고 고른다). 기록: state/quota_switch.tsv, 메모: state/handoff/.
   재개   대기로 둔 워커는 state/quota_wait.json에 풀리는 시각을 적는다. 그 시각이 지나고 이 도구가 다시 돌면
          워커에게 '한도가 풀렸다, 이어서 하라'를 보낸다(orca orchestration send --to dispatch:<id>).
-멈춘 워커의 투입은 실적(성공·실패)에 넣지 않는다. 한도는 품질 문제가 아니다.
+  필터   정지 점검의 '필터 중단'(마지막 응답이 안전 필터·이용 정책 차단)도 같은 절차로 넘긴다. 기다려도 풀리지 않으니
+         대기 판정(곧 풀림)은 없고, 그 모델은 이 작업의 후보에서 뺀다(state/quota_switch.tsv 9번째 칸 filter).
+         설정 routing.on_filter: switch(기본) | wait.
+멈춘 워커의 투입은 실적(성공·실패)에 넣지 않는다. 한도·필터는 품질 문제가 아니다.
   --due  할 일(한도 정지 또는 재개할 대기)이 있으면 종료코드 0, 없으면 1. 아무것도 바꾸지 않는다(예약 점검의 사전 확인용).
 """
 import argparse
@@ -40,7 +44,7 @@ def git(ws, *args, env=None, check=True):
     return p.stdout.strip()
 
 
-def snapshot(ws, tid, base, reason):
+def snapshot(ws, tid, base, reason, did=""):
     """멈춘 순간의 작업 트리 전체(커밋하지 않은 변경·새 파일 포함)를 임시 브랜치로. 작업 브랜치·인덱스·파일은 그대로 둔다."""
     head = git(ws, "rev-parse", "HEAD")
     with tempfile.TemporaryDirectory() as td:
@@ -57,7 +61,8 @@ def snapshot(ws, tid, base, reason):
         if p.returncode != 0:
             raise RuntimeError(f"commit-tree: {(p.stderr or p.stdout).strip()[:200]}")
         commit = p.stdout.strip()
-    name = f"wip/{tid}-quota-{dt.datetime.now():%Y%m%d-%H%M%S}"
+    # 같은 작업을 같은 초에 두 번 넘겨도 겹치지 않게 dispatch 끝자리를 붙인다(정리 도구는 wip/<ID>-quota-*로 찾는다)
+    name = f"wip/{tid}-quota-{dt.datetime.now():%Y%m%d-%H%M%S}" + (f"-{re.sub(r'[^0-9A-Za-z]', '', did)[-6:]}" if did else "")
     git(ws, "branch", name, commit)
     files = [ln[3:] for ln in git(ws, "status", "--porcelain").splitlines() if ln.strip()]
     log = git(ws, "log", "--oneline", "-10", f"{base}..HEAD", check=False) if base else ""
@@ -151,12 +156,15 @@ def decide(repo, cfg, tasks, catalog, pol, q, quota, live):
     """→ (전환|대기, 이유, 결정(route 결과)|None, review 여부)."""
     qc = routing.quota_cfg(pol)
     tid = q["kit_id"]
-    win = ", ".join(f"{lab} {u:.0f}%" for lab, u, _ in q["windows"])
+    filt = q.get("kind") == "filter"
+    win = f"필터 중단(\"{q.get('evidence', '')[:70]}\")" if filt else ", ".join(f"{lab} {u:.0f}%" for lab, u, _ in q["windows"])
     if not tid or tid not in tasks:
         return "대기", f"키트 작업이 아니다({q.get('title')}) — 손으로 처리", None, False
-    if str(qc.get("on_exhausted", "switch")).lower() == "wait":
+    if filt and str(routing.rcfg(pol, "on_filter", "switch")).lower() == "wait":
+        return "대기", f"{win} · 설정 on_filter: wait", None, False
+    if not filt and str(qc.get("on_exhausted", "switch")).lower() == "wait":
         return "대기", f"{win} · 설정 on_exhausted: wait", None, False
-    if q["resets"] and q["resets"] - time.time() <= float(qc.get("wait_minutes", 30)) * 60:
+    if not filt and q["resets"] and q["resets"] - time.time() <= float(qc.get("wait_minutes", 30)) * 60:
         left = max(0, int((q["resets"] - time.time()) // 60))
         return "대기", f"{win} · {routing._hm(q['resets'])}에 풀린다({left}분 뒤, 기준 {qc.get('wait_minutes', 30)}분)", None, False
     review = q["mode"] == "review"
@@ -168,7 +176,7 @@ def decide(repo, cfg, tasks, catalog, pol, q, quota, live):
         impl = {r["agent"] for r in routing.read_dispatch(repo, set(tasks))
                 if r["kit_id"] == tid and r["mode"] in ("new", "retry", "handoff") and r["agent"]}
     dec = routing.route(repo, cfg, tid, tasks, "review" if review else "handoff", live_dids=live, catalog=catalog, pol=pol, quota=quota,
-                        need_minutes=need, exclude_agents=impl)
+                        need_minutes=need, exclude_agents=impl, exclude_keys={q["key"]} if filt and q.get("key") else None)
     if not dec.get("key"):
         ex = dec.get("excluded", {}).values()
         tight = sorted({v for v in ex if v.startswith("넘겨받기엔 빠듯")})
@@ -203,6 +211,12 @@ def main(argv=None):
         print(f"Orca 워커 목록을 읽지 못했다: {o['error']}", file=sys.stderr)
         return 1
     stalls = status.quota_stalls(repo, catalog, pol, o.get("workers") or [], quota=quota)
+    rcat = routing.resolve_catalog(catalog, routing.discover(repo, catalog))
+    for w in s.get("turn_stops") or []:   # 필터 중단: 한도 정지와 같은 꼴로
+        key = w.get("key") or (routing.key_of_row({"agent": w.get("agent", ""), "model": w.get("model_id", "")}, rcat["models"]) or "")
+        stalls.append({"dispatch": w["dispatch"], "kit_id": w.get("kit_id"), "title": w.get("title"), "mode": w.get("mode") or "new",
+                       "agent": w.get("agent", ""), "key": key, "workspace": w.get("workspace"), "windows": [], "resets": None,
+                       "kind": "filter", "evidence": w.get("evidence", "")})
     if a.ids:
         stalls = [x for x in stalls if x["kit_id"] in a.ids]
     live = {w["dispatch"] for w in o.get("workers") or []}
@@ -218,7 +232,7 @@ def main(argv=None):
     if not stalls:
         if not a.dry_run:
             write_waits(repo, waits)
-        print("한도 정지 워커 없음" + (f" · 대기 {len(waits)}건(다음 풀림 {routing._hm(min(w['resets'] for w in waits.values()))})"
+        print("한도 정지·필터 중단 워커 없음" + (f" · 대기 {len(waits)}건(다음 풀림 {routing._hm(min(w['resets'] for w in waits.values()))})"
                                         if waits and all(w.get("resets") for w in waits.values()) else ""))
         return 0
     rc = 0
@@ -244,7 +258,8 @@ def main(argv=None):
         rv = re.match(r".+?-RV-(.+)$", (q.get("title") or "").split()[0]) if review else None
         suffix = (f"{rv.group(1)}-h{n}" if rv else f"h{n}") if review else f"h{n}"
         base = str(t.get("base") or "")
-        reason = ", ".join(f"{lab} {u:.0f}%" for lab, u, _ in q["windows"])
+        filt = q.get("kind") == "filter"
+        reason = f"안전 필터: {q.get('evidence', '')[:120]}" if filt else ", ".join(f"{lab} {u:.0f}%" for lab, u, _ in q["windows"])
         steps = [f"worker-stop --dispatch {q['dispatch']}", f"보존: wip/{tid}-quota-<시각> (작업 트리 스냅샷)",
                  f"worker-release --dispatch {q['dispatch']}",
                  f"launch.sh --handoff <메모> --suffix {suffix} --worktree path:{ws}" + (" --review" if review else "") + f" {tid}"]
@@ -259,7 +274,7 @@ def main(argv=None):
             continue
         try:
             ref = next((r for r in (base, f"origin/{base}") if base and git(ws, "rev-parse", "-q", "--verify", r, check=False)), "")
-            snap = snapshot(ws, tid, ref, reason)
+            snap = snapshot(ws, tid, ref, reason, q["dispatch"])
         except RuntimeError as e:
             print(f"  보존 실패: {e} — 워커는 멈췄고 작업 트리는 그대로다. 손으로 보존한 뒤 launch.sh --handoff", file=sys.stderr)
             rc = 1
@@ -272,16 +287,19 @@ def main(argv=None):
         hd.mkdir(parents=True, exist_ok=True)
         notes = hd / f"{tid}-{suffix}.md"
         prev = prior_notes(repo, cfg, q.get("title"), tid)
-        lines = [f"- 멈춘 워커: {q['key'] or q['agent']} (dispatch {q['dispatch']}) — 사용량 한도 {reason}",
+        lines = [f"- 멈춘 워커: {q['key'] or q['agent']} (dispatch {q['dispatch']}) — " + (reason if filt else f"사용량 한도 {reason}"),
                  f"- 보존 브랜치: `{snap['branch']}` (멈춘 순간 스냅샷 {snap['commit']})",
                  f"- 기준(`{base or '?'}`) 이후 커밋 {snap['commits'] or '?'}개" + (":\n" + "\n".join(f"  - {x}" for x in snap["log"].splitlines()) if snap["log"] else ""),
                  f"- 커밋하지 않은 파일 {len(snap['dirty_files'])}개" + (":\n" + "\n".join(f"  - `{x}`" for x in snap["dirty_files"][:30]) if snap["dirty_files"] else "")]
+        if filt:
+            lines.append("- 앞 워커의 응답이 위 문구로 끊겼다(같은 모델의 다른 작업은 정상일 수 있다). 같은 입력·표현을 그대로 되풀이하지 말고, "
+                         "경계·악성 입력이 필요한 시험은 검증 목적을 밝히고 최소한으로 쓴다. 다시 끊기면 그 지점과 문구를 보고에 적는다.")
         if prev:
             lines.append(f"\n### 지적\n{prev}")
         notes.write_text("\n".join(lines) + "\n", encoding="utf-8")
         with open(routing.state_dir(repo) / "quota_switch.tsv", "a", encoding="utf-8") as f:
-            f.write("\t".join([dt.datetime.now().strftime("%F %T"), tid, q["dispatch"], q["agent"], q["key"], reason,
-                               snap["branch"], suffix]) + "\n")
+            f.write("\t".join([dt.datetime.now().strftime("%F %T"), tid, q["dispatch"], q["agent"], q["key"], reason.replace("\t", " "),
+                               snap["branch"], suffix, "filter" if filt else "quota"]) + "\n")
         # 고른 구독을 그대로 넘긴다(kit.yaml review.agent 같은 고정이 한도 찬 구독을 다시 고르지 않게)
         pick = ["--agent", dec["agent"]] + (["--model", str(dec["model"])] if dec.get("model") else []) \
             + (["--effort", str(dec["effort"])] if dec.get("effort") else [])

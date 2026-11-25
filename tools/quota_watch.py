@@ -75,7 +75,8 @@ def pending(repo, cfg):
     waits = quota_switch.read_waits(repo)
     due = [(d, waits[d]) for d in quota_switch.due_waits(waits, stalls)]
     waiting = {q["dispatch"] for q in stalls if q["dispatch"] in waits}
-    return [q for q in stalls if q["dispatch"] not in waiting], due
+    filt = [dict(w, windows=[("필터 중단", 100.0, None)]) for w in s.get("turn_stops") or []]
+    return [q for q in stalls if q["dispatch"] not in waiting] + filt, due
 
 
 def cmd_precheck(repo, cfg, a):
@@ -90,12 +91,13 @@ def cmd_precheck(repo, cfg, a):
     remind = float(a.remind or REMIND_MIN) * 60
     if st.get("last_sig") == sig and time.time() - float(st.get("last_sent", 0)) < remind:
         return 1
-    parts = [f"{q['kit_id'] or q.get('title') or '?'} " + ", ".join(f"{lab} {u:.0f}%" for lab, u, _ in q["windows"]) for q in stalls]
+    parts = [f"{q.get('kit_id') or q.get('title') or '?'} " + (f"필터 중단(\"{q.get('evidence', '')[:60]}\")" if q.get("evidence")
+             else ", ".join(f"{lab} {u:.0f}%" for lab, u, _ in q["windows"])) for q in stalls]
     parts += [f"{w.get('kit_id') or '?'} 한도 풀림({routing._hm(w['resets'])})" for _, w in due]
     body = ("예약 점검(quota_watch): " + "; ".join(parts)[:600]
             + " → python3 orchestration/tools/quota_switch.py (판정·전환·재개). 자세히: status.py --stall")
     d = run_json(["orchestration", "send", "--to", f"run:{run}", "--type", "status",
-                  "--subject", f"한도 점검: 한도 정지 {len(stalls)} · 한도 풀림 {len(due)}", "--body", body])
+                  "--subject", f"한도 점검: 한도 정지·필터 중단 {len(stalls)} · 한도 풀림 {len(due)}", "--body", body])
     if d.get("ok"):
         st.update(last_sig=sig, last_sent=time.time(), last_body=body)
         write_state(repo, st)

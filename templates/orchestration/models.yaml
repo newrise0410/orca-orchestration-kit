@@ -37,6 +37,7 @@ routing:
     wait_minutes: 30           # 막은 창이 이 시간 안에 풀리면 전환하지 않고 기다린다
     switch_min_headroom: 30    # 넘겨받을 구독은 창마다 이만큼(%) 남아 있어야 한다
     switch_need_minutes: 120   # 넘겨받을 구독이 지금 소모 속도로 이 시간(또는 앞 워커가 풀릴 때까지 중 짧은 쪽) 안에 다시 차면 넘기지 않는다
+  on_filter: switch            # 워커가 안전 필터·이용 정책 차단으로 끊기면(정지 점검 '필터 중단') quota_switch.py: switch(이어받기, 그 모델은 그 작업 후보에서 뺀다) | wait
   bench: true                  # 품질을 공개 벤치마크(Terminal-Bench, tools/bench_scores.yaml)로. false면 카탈로그 추정값
   daily_soft_tokens: {}        # 하루 출력 토큰 기준(Orca 집계, 모든 프로젝트 합). 넘으면 벌점 (예: {claude: 2000000})
 

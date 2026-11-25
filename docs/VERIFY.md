@@ -233,3 +233,9 @@ v0.4.1(10장)에서 snap 설치본은 작업 폴더 신뢰 확인 창에 막혔�
 - 수정: `kitlib.workspace_path`(`::` 뒤를 경로로, Windows `C:`는 그대로)를 status·quota_switch·cleanup_worker가 쓴다. 가짜 Orca도 실제 꼴로 준다.
 - 시험 134/134: 값 풀기(ID 붙은 꼴·경로만·Windows 경로·dict), status가 그 꼴에서 경로와 마지막 커밋을 읽음, 한도 전환 전체 흐름이 실제 꼴로 통과.
 
+## 20. v0.8.3: 커밋 없음 기준·필터 중단 (2026-11-25)
+- 시험 139/139(이전 134 + 5): 투입 28분째 워커는 앞 차수 커밋(61분 전)으로 '커밋 없음'이 아니고, 투입이 70분 전이면 '커밋 없음 · 투입 …'. 필터 중단: 도구 결과 속 'usage policy'는 오탐하지 않음, 마지막 응답의 차단 문구는 `필터 중단 X (dispatch): "API Error: … Usage Policy"`, quota_switch가 같은 절차로 넘기고 기록 kind=filter, 그 모델(claude-sonnet)은 그 작업의 후보에서 빠지고 다른 작업은 그대로.
+- `worker-read` 실제 꼴: 작은 워커(claude haiku, 읽기 전용)를 띄워 확인하고 해제했다. `result.transcript.messages[]`, 메시지마다 `role`(user/assistant/tool)·`blocks[]`(text·tool-call·tool-result)·`timestamp`. 판정은 이 꼴을 쓴다.
+- 시험이 잡은 결함: 같은 작업을 같은 초에 두 번 넘기면 보존 브랜치 이름이 겹쳐 보존이 실패했다(시험이 가끔 실패). 이름에 dispatch 끝자리를 붙였다.
+- 실제 필터 중단 화면으로는 시험하지 못했다(일부러 만들 수 없었다). 문구 목록이 현장 CLI의 실제 차단 문구를 못 맞추면 정지 점검에 안 나온다 — 그때는 그 문구를 알려 주면 목록에 넣는다.
+
