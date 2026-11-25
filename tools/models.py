@@ -226,7 +226,7 @@ def cmd_stats(a):
     repo, cfg, catalog, pol = ctx(a)
     _, tasks = kitlib.all_tasks(repo, cfg)
     rows = routing.read_dispatch(repo, set(tasks))
-    outs = routing.outcomes(rows, tasks, routing.read_feedback(repo), catalog["models"])
+    outs = routing.outcomes(rows, tasks, routing.read_feedback(repo), catalog["models"], skip=routing.read_switches(repo))
     lv = routing.learned(outs)
     cnt = {}
     for r in rows:

@@ -168,6 +168,20 @@ def retry_section(t, notes_text, cfg):
             f"### 지적\n{notes_text.rstrip()}\n")
 
 
+def handoff_section(t, notes_text, cfg, review=False):
+    """한도 전환 이어받기: 앞 워커가 구독 한도로 멈춘 같은 워크트리에서 이어서 끝낸다(quota_switch.py가 부른다)."""
+    b = t.get("branch", "")
+    end = ("검토 명세의 끝 절차대로 보고서를 쓰고 `worker_done`"
+           if review else f"원 명세의 끝 절차(빌드·전체 시험 → 커밋 → `{git_cmds(cfg, b, b)['push']}` → `worker_done`)")
+    return (f"## 이어받기 (앞 워커가 구독 사용량 한도로 멈췄다)\n"
+            f"이 워크트리에는 앞 워커의 진행분이 그대로 있다(커밋 + 커밋하지 않은 변경). **처음부터 다시 하지 말고** 이어서 끝내라.\n"
+            f"- 시작: `git status`와 `git log --oneline -15`, 커밋하지 않은 변경의 `git diff`로 어디까지 했는지 본다. "
+            f"아래 보존 브랜치는 멈춘 순간의 전체 스냅샷이다(작업 트리가 이상하면 그것과 비교한다. 그 브랜치에는 커밋하지 않는다).\n"
+            f"- 앞 워커가 남긴 완료 조건 확인·시험 결과를 믿지 말고 다시 돌려 확인한다.\n"
+            f"- 끝: {end}. 보고 첫머리에 `이어받기: 앞 워커 진행분 중 쓴 것 / 고친 것`을 한 줄로 적는다.\n\n"
+            f"### 앞 워커\n{notes_text.rstrip()}\n")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="tasks.yaml → 작업 명세 렌더링")
     ap.add_argument("ids", nargs="*")
@@ -175,7 +189,8 @@ def main(argv=None):
     ap.add_argument("--list-ready", action="store_true")
     ap.add_argument("--review", action="store_true", help="작업의 구현을 검토하는 명세를 만든다")
     ap.add_argument("--retry", metavar="NOTES", help="남은 지적 파일: req/<ID>에서 수정하는 재투입 명세를 만든다")
-    ap.add_argument("--suffix", default="", help="검토·재투입 차수 이름 (예: r1)")
+    ap.add_argument("--handoff", metavar="NOTES", help="한도 전환 이어받기 메모: 멈춘 워커의 워크트리에서 이어서 끝내는 명세(--review와 같이 쓸 수 있다)")
+    ap.add_argument("--suffix", default="", help="검토·재투입·이어받기 차수 이름 (예: r1, h1)")
     ap.add_argument("--stdout", action="store_true")
     ap.add_argument("--no-extra", action="store_true", help="specs/<ID>.extra.md를 붙이지 않는다")
     ap.add_argument("--repo"), ap.add_argument("--config"), ap.add_argument("--tasks")
@@ -203,6 +218,9 @@ def main(argv=None):
     if a.retry and not a.suffix:
         print("--retry에는 --suffix(차수 이름, 예: r1)가 필요하다", file=sys.stderr)
         return 2
+    if a.handoff and (a.retry or not a.suffix):
+        print("--handoff에는 --suffix(예: h1)가 필요하고 --retry와 함께 쓰지 않는다(재투입의 지적은 이어받기 메모에 넣는다)", file=sys.stderr)
+        return 2
     ids = ready_ids(tasks, cfg) if a.ready else a.ids
     if not ids:
         print("렌더링할 작업이 없다", file=sys.stderr)
@@ -216,12 +234,17 @@ def main(argv=None):
             rt = review_task(t, cfg, a.suffix)
             text = render(rt, tasks, cfg, runtime, tpl_dir, warn, template="review-spec.md")
             stem = f"{i}.review" + (f"-{a.suffix}" if a.suffix else "")
+            if a.handoff:
+                text = insert_before_end(text, handoff_section(t, Path(a.handoff).read_text(encoding="utf-8"), cfg, review=True))
         else:
             text = render(t, tasks, cfg, runtime, tpl_dir, warn)
             stem = i
             if a.retry:
                 text = insert_before_end(text, retry_section(t, Path(a.retry).read_text(encoding="utf-8"), cfg))
                 stem = f"{i}.retry-{a.suffix}"
+            elif a.handoff:
+                text = insert_before_end(text, handoff_section(t, Path(a.handoff).read_text(encoding="utf-8"), cfg))
+                stem = f"{i}.handoff-{a.suffix}"
         # 인계 사항: 원 작업의 <ID>.extra.md(검토 명세 제외) + 이 명세 전용 <stem>.extra.md
         extras = ([] if a.review else [f"{i}.extra.md"]) + ([f"{stem}.extra.md"] if stem != i else [])
         for name in extras:

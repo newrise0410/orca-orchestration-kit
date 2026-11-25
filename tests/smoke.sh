@@ -294,7 +294,7 @@ check "동점: 부동소수 오차 무시 · 부하 → 소모 순으로 가림 
 import sys; sys.path.insert(0,'$T'); import routing
 cat,pol=routing.load('.'); cat=routing.apply_bench(cat)
 c={'difficulty':3.0,'tags':['coding'],'critical':True,'reasons':[]}
-ctx={'objective':'balanced','learned':{('codex-sol','mid'):(3.0,3)},'running':{},'usage':{},'failed':set(),'avoid_agent':None}
+ctx={'objective':'balanced','learned':{('codex-sol','mid'):(3.0,3)},'running':{},'usage':{},'failed':set(),'avoid_agents':[]}
 s,why=routing.score('codex-sol',cat['models']['codex-sol'],c,pol,ctx)
 assert any(w.startswith('실적 3.0/3') for w in why), why
 a=(0.35000000000000001,'b-key',[],False); b=(0.35,'a-key',[],False)
@@ -338,6 +338,121 @@ rm -f orchestration/state/quota_cache.json
 o=$(FAKE_QUOTA=full ORCA_CLI_COMMAND="$W/fake-orca-q" KIT_RUN=run_x $T/launch.sh --dry-run --force X-DOC 2>&1)
 check "launch: 모든 구독 한도 소진이면 기본 에이전트로 띄우지 않고 보류" bash -c 'grep -q "보류: 후보 없음" <<<"$0" && grep -q "한도가 모두 찼다" <<<"$0" && ! grep -q "worker-start" <<<"$0"' "$o"
 rm -f orchestration/state/quota_cache.json
+# 한도 전환: 도는 워커의 구독이 한도 100% → 정지 점검 '한도 정지' → quota_switch.py(대기 판정 또는 보존·정리·이어받기)
+cat > "$W/fake-orca-sw.py" <<'PY'
+import json, os, sys, time
+a = " ".join(sys.argv[1:]); st = os.environ["FAKE_SW_DIR"]
+open(st + "/calls.log", "a").write(a + "\n")
+now, h = time.time() * 1000, 3600 * 1000
+reset = now + (10 * 60 * 1000 if os.environ.get("FAKE_SW") == "soon" else 3 * h)
+used = 20 if os.environ.get("FAKE_SW") == "free" else 100
+def out(o): print(json.dumps(o)); sys.exit(0)
+if a.startswith("account list"):
+    ok = lambda u, m, r: {"usedPercent": u, "windowMinutes": m, "resetsAt": r}
+    out({"ok": True, "result": {"rateLimits": {
+        "codex": {"provider": "codex", "status": "ok", "session": ok(used, 300, reset), "weekly": ok(40, 10080, now + 100 * h)},
+        "claude": {"provider": "claude", "status": "ok", "weekly": ok(10, 10080, now + 100 * h)},
+        "grok": {"provider": "grok", "status": "ok", "weekly": ok(10, 10080, now + 100 * h)},
+        "antigravity": {"provider": "antigravity", "status": "ok", "weekly": ok(10, 10080, now + 100 * h)}}}})
+if "worker-list" in a:
+    out({"ok": True, "result": {"workers": [{"dispatchId": os.environ.get("FAKE_SW_DID", "ctx_5a1"), "taskId": "task_5a1", "state": "running",
+                                             "liveness": "alive", "workspace": os.environ["FAKE_SW_WT"]}]}})
+if "task-list" in a: out({"ok": True, "result": {"tasks": [{"id": "task_5a1", "title": os.environ.get("FAKE_SW_TITLE", "X-SW")}]}})
+if "inbox" in a: out({"ok": True, "result": {"messages": []}})
+if "worker-stop" in a or "worker-release" in a or a.startswith("orchestration send"): out({"ok": True, "result": {}})
+if a.startswith("automations create"): out({"ok": True, "result": {"automation": {"id": "auto-1", "enabled": True}}})
+if a.startswith("automations show"): out({"ok": True, "result": {"automation": {"id": "auto-1", "name": "t", "enabled": True}}})
+if a.startswith("automations remove"): out({"ok": True, "result": {}})
+if "task-create" in a: out({"ok": True, "result": {"id": "task_abc777"}})
+if "worker-start" in a: out({"ok": True, "result": {"dispatchId": "ctx_def777", "state": "ready"}})
+print('{"ok":false}'); sys.exit(1)
+PY
+printf '#!/bin/sh\nexec python3 %s "$@"\n' "$W/fake-orca-sw.py" > "$W/fake-orca-sw"; chmod +x "$W/fake-orca-sw"
+mkdir -p "$W/sw"; : > "$W/sw/calls.log"
+cat >> orchestration/tasks.yaml <<'YAML'
+- id: X-SW
+  title: 한도 전환 시험 작업
+  layer: L2
+  module: api
+  branch: req/X-SW
+  base: int/api
+  deps: []
+  write_scope: [api/sw/]
+  acceptance: "api/sw/ 아래 기능을 만든다"
+  status: running
+YAML
+git add -A >/dev/null && git commit -qm "[L0] X-SW" && git branch -f int/api HEAD
+git worktree add -q -b req/X-SW "$W/wt-x-sw" int/api && mkdir -p "$W/wt-x-sw/api/sw"
+echo a > "$W/wt-x-sw/api/sw/done.txt"; git -C "$W/wt-x-sw" add -A && git -C "$W/wt-x-sw" commit -qm "[X-SW] 절반"
+echo b > "$W/wt-x-sw/api/sw/wip.txt"; swhead=$(git -C "$W/wt-x-sw" rev-parse HEAD)
+printf 'X-SW\ttask_5a1\tctx_5a1\tx-sw\t2026-01-02 10:00:00\tcodex\tgpt-6.2-sol\tmedium\tcodex-sol\t3.0\t\n' >> orchestration/state/dispatch.tsv
+cp orchestration/kit.yaml "$W/kit.yaml.pre-sw"; sed -i 's/^  work_run: .*/  work_run: "run_sw"/' orchestration/kit.yaml
+export FAKE_SW_DIR="$W/sw" FAKE_SW_WT="$W/wt-x-sw"
+SW="env ORCA_CLI_COMMAND=$W/fake-orca-sw KIT_NO_CLI_UPDATE=1"
+rm -f orchestration/state/quota_cache.json
+o=$($SW python3 $T/status.py --stall 2>&1)
+check "정지 점검: 한도 정지(구독·창·초기화 시각 → quota_switch.py)" bash -c 'grep -q "한도 정지 X-SW (ctx_5a1): codex 세션 100%(.* 초기화) · codex-sol → python3 orchestration/tools/quota_switch.py" <<<"$0"' "$o"
+o=$($SW python3 $T/quota_switch.py --dry-run 2>&1)
+check "quota_switch --dry-run: 전환 계획만(Orca 변경 없음)" bash -c 'grep -q "^\[전환\] X-SW" <<<"$0" && grep -q "(dry-run) worker-stop --dispatch ctx_5a1" <<<"$0" && ! grep -q "worker-stop" "$1/calls.log"' "$o" "$W/sw"
+o=$(FAKE_SW=soon $SW python3 $T/quota_switch.py 2>&1)
+check "곧 풀리면(기준 30분) 대기" bash -c 'grep -q "^\[대기\] X-SW .*풀린다(.*분 뒤, 기준 30분)" <<<"$0" && ! grep -q "worker-stop" "$1/calls.log"' "$o" "$W/sw"
+check "대기: 재개 예약(풀리는 시각 기록)" bash -c 'grep -q "재개 예약: .*에 풀리면" <<<"$0" && grep -q "\"ctx_5a1\"" orchestration/state/quota_wait.json' "$o"
+rm -f orchestration/state/quota_cache.json
+o=$(FAKE_SW=soon $SW python3 $T/status.py --stall 2>&1)
+check "정지 점검: 대기 중인 한도 정지는 재개 예정 시각 표시" has "$o" "대기 중("
+python3 -c "
+import json; p='orchestration/state/quota_wait.json'; d=json.load(open(p)); d['ctx_5a1']['resets']-=3600; json.dump(d,open(p,'w'))"
+rm -f orchestration/state/quota_cache.json
+o=$(FAKE_SW=free $SW python3 $T/status.py --stall 2>&1)
+check "정지 점검: 한도가 풀린 대기 → 한도 풀림" has "$o" "한도 풀림 X-SW (ctx_5a1)"
+check "quota_switch --due: 할 일 있으면 0" bash -c "FAKE_SW=free $SW python3 $T/quota_switch.py --due >/dev/null"
+o=$(FAKE_SW=free $SW python3 $T/quota_switch.py 2>&1)
+check "재개: 워커에 '이어서 하라'를 보내고 대기 기록을 지운다" bash -c 'grep -q "^\[재개\] X-SW (ctx_5a1)" <<<"$0" && grep -q "orchestration send --to dispatch:ctx_5a1 --type status --subject 한도 풀림" "$1/calls.log" && ! grep -q "ctx_5a1" orchestration/state/quota_wait.json && ! grep -q "worker-stop" "$1/calls.log"' "$o" "$W/sw"
+check "quota_switch --due: 할 일 없으면 1" bash -c "! FAKE_SW=free $SW python3 $T/quota_switch.py --due >/dev/null"
+# 예약 점검(quota_watch): 사전 확인은 할 일이 있으면 매니저 Run에 메일, 언제나 1(에이전트를 띄우지 않는다), 같은 알림은 30분에 한 번
+: > "$W/sw/calls.log"; rm -f orchestration/state/quota_cache.json orchestration/state/quota_watch.json
+check "watch precheck: 할 일 없으면 1 · 메일 없음" bash -c "! FAKE_SW=free $SW python3 $T/quota_watch.py precheck && ! grep -q 'orchestration send' $W/sw/calls.log"
+rm -f orchestration/state/quota_cache.json
+check "watch precheck: 한도 정지면 매니저 Run에 알림 · 그래도 1" bash -c "! $SW python3 $T/quota_watch.py precheck && grep -q 'orchestration send --to run:run_sw --type status --subject 한도 점검: 한도 정지 1' $W/sw/calls.log"
+check "watch precheck: 같은 내용은 다시 알리지 않음" bash -c "! $SW python3 $T/quota_watch.py precheck && test \$(grep -c 'orchestration send --to run:run_sw' $W/sw/calls.log) -eq 1"
+o=$($SW python3 $T/quota_watch.py install --every 10 2>&1)
+check "watch install: Orca 예약 실행(10분, 사전 확인 절대 경로) 등록·기록" bash -c 'grep -q "등록: .* (auto-1)" <<<"$0" && grep -q -- "automations create .*--trigger \*/10 \* \* \* \* .*--precheck cd .* && ORCA_CLI_COMMAND=.* orchestration/tools/quota_watch.py precheck" "$1/calls.log" && grep -q auto-1 orchestration/state/quota_watch.json' "$o" "$W/sw"
+o=$($SW python3 $T/quota_watch.py install 2>&1); check "watch install: 이미 있으면 다시 만들지 않음" has "$o" "이미 등록됨"
+o=$($SW python3 $T/quota_watch.py remove 2>&1); check "watch remove" bash -c 'grep -q "지움: auto-1" <<<"$0" && ! grep -q auto-1 orchestration/state/quota_watch.json' "$o"
+rm -f orchestration/state/quota_cache.json orchestration/state/quota_watch.json
+rm -f orchestration/state/quota_cache.json
+cp orchestration/models.yaml "$W/models.yaml.pre-sw"
+python3 -c "
+import yaml; p='orchestration/models.yaml'; d=yaml.safe_load(open(p)); d['routing'].setdefault('quota',{})['on_exhausted']='wait'; yaml.safe_dump(d,open(p,'w'),allow_unicode=True,sort_keys=False)"
+o=$($SW python3 $T/quota_switch.py 2>&1)
+check "설정 on_exhausted: wait면 대기" has "$o" "on_exhausted: wait"
+cp "$W/models.yaml.pre-sw" orchestration/models.yaml
+o=$($SW python3 $T/quota_switch.py 2>&1)
+check "전환: 멈춤 → 보존 → 해제 → 같은 워크트리에서 다른 구독으로 이어받기" bash -c 'l=$(cat "$1/calls.log"); grep -q "worker-stop --dispatch ctx_5a1" <<<"$l" && grep -q "worker-release --dispatch ctx_5a1" <<<"$l" && grep -q -- "worker-start .*--worktree path:$2" <<<"$l" && ! grep -q -- "worker-start .*--agent codex" <<<"$l" && grep -q "보존: wip/X-SW-quota-" <<<"$0"' "$o" "$W/sw" "$W/wt-x-sw"
+wip=$(git for-each-ref --format='%(refname:short)' 'refs/heads/wip/X-SW-quota-*' | head -1)
+check "보존 브랜치에 커밋하지 않은 변경까지 · 작업 브랜치·작업 트리는 그대로" bash -c 'test -n "$0" && git show "$0:api/sw/wip.txt" | grep -qx b && test "$(git -C "$1" rev-parse HEAD)" = "$2" && test -f "$1/api/sw/wip.txt" && git -C "$1" status --porcelain | grep -q "wip.txt"' "$wip" "$W/wt-x-sw" "$swhead"
+check "기록: dispatch(handoff-h1)·quota_switch.tsv·이어받기 명세·status는 running 그대로" bash -c 'tail -1 orchestration/state/dispatch.tsv | grep -q "^X-SW handoff-h1	task_abc777	ctx_def777" && grep -q "	X-SW	ctx_5a1	codex	codex-sol	" orchestration/state/quota_switch.tsv && grep -q "## 이어받기" orchestration/specs/X-SW.handoff-h1.md && grep -q "$0" orchestration/specs/X-SW.handoff-h1.md && grep -A9 "id: X-SW" orchestration/tasks.yaml | grep -q "status: running"' "$wip"
+check "실적: 한도로 멈춘 투입은 셈에서 뺀다 · handoff는 새 투입처럼" python3 -c "
+import sys; sys.path.insert(0,'$T'); import routing, kitlib
+cfg=kitlib.load_config('.'); _,tasks=kitlib.all_tasks('.',cfg); cat,_=routing.load('.')
+rows=routing.read_dispatch('.',set(tasks)); sk=routing.read_switches('.')
+assert 'ctx_5a1' in sk, sk
+assert [r['mode'] for r in rows if r['did']=='ctx_def777']==['handoff']
+tasks['X-SW']['status']='merged'
+o={x['did']:x['score'] for x in routing.outcomes(rows,tasks,[],cat['models'],skip=sk) if x['kit_id']=='X-SW'}
+assert 'ctx_5a1' not in o and o.get('ctx_def777')==1.0, o"
+# 검토 워커: 남은 후보가 구현한 구독뿐이면 검토 독립성 때문에 대기
+printf 'X-SW-RV\ttask_5a2\tctx_5a2\tx-sw-rv\t2026-01-02 12:00:00\tcodex\tgpt-6.2-sol\tmedium\tcodex-sol\t3.0\t\n' >> orchestration/state/dispatch.tsv
+impl=$(tail -2 orchestration/state/dispatch.tsv | head -1 | cut -f6)
+sed -i "s/^  agents: .*/  agents: [codex, $impl]/" orchestration/models.yaml
+: > "$W/sw/calls.log"
+o=$(FAKE_SW_DID=ctx_5a2 FAKE_SW_TITLE=X-SW-RV $SW python3 $T/quota_switch.py 2>&1)
+check "검토 워커: 남은 후보가 구현한 구독이면 대기(검토 독립성)" bash -c 'grep -q "^\[대기\] X-SW .*검토 독립성" <<<"$0" && ! grep -q "worker-stop" "$1/calls.log"' "$o" "$W/sw"
+cp "$W/models.yaml.pre-sw" orchestration/models.yaml; cp "$W/kit.yaml.pre-sw" orchestration/kit.yaml
+rm -f orchestration/state/quota_cache.json; unset FAKE_SW_DIR FAKE_SW_WT
+git branch req/X-CL int/api && git worktree add -q "$W/x-cl" req/X-CL && git branch wip/X-CL-quota-20260101-000000 req/X-CL
+o=$(ORCA_CLI_COMMAND="$W/fake-orca-sw" FAKE_SW_DIR="$W/sw" FAKE_SW_WT="$W/wt-x-sw" $T/cleanup_worker.sh --dry-run x-cl req/X-CL int/api 2>&1)
+check "cleanup: 머지된 작업의 한도 전환 보존 브랜치도 지운다" has "$o" "git branch -D wip/X-CL-quota-20260101-000000"
 # 공개 벤치마크 → 품질: Terminal-Bench 페이지(이스케이프된 리더보드 JSON)에서 카탈로그에 맞는 줄만, 다른 CLI 점수는 빌리지 않는다
 python3 - "$W/tb.html" <<'PY'
 import json, sys

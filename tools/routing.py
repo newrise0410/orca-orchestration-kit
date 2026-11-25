@@ -399,9 +399,9 @@ def availability(key, m, pol, disc):
 # ───────────────────────── 이력·학습
 
 def kit_id_of(title, ids):
-    """Orca 작업 제목 → (키트 ID, 모드). 'X-01' new, 'X-01-RV[-s]' review, 'X-01 retry-r1' retry."""
+    """Orca 작업 제목 → (키트 ID, 모드). 'X-01' new, 'X-01-RV[-s]' review, 'X-01 retry-r1' retry, 'X-01 handoff-h1' handoff(한도 전환 이어받기)."""
     head = (title or "").split()[0] if title else ""
-    mode = "retry" if " retry-" in (title or "") else "new"
+    mode = "retry" if " retry-" in (title or "") else ("handoff" if " handoff-" in (title or "") else "new")
     if head in ids:
         return head, mode
     mm = re.match(r"(.+?)-RV(?:-.+)?$", head)
@@ -429,6 +429,18 @@ def read_dispatch(repo, ids):
              "difficulty": c[9] if len(c) > 9 else "", "jev": c[10] if len(c) > 10 else ""}
         rows.append(r)
     return rows
+
+
+def read_switches(repo):
+    """한도 전환으로 멈춘 dispatch ID 집합(state/quota_switch.tsv 3번째 칸). 그 투입은 실적(성공·실패)에 넣지 않는다."""
+    p = state_dir(repo) / "quota_switch.tsv"
+    out = set()
+    if p.is_file():
+        for ln in p.read_text(encoding="utf-8").splitlines():
+            c = ln.split("\t")
+            if len(c) >= 3 and not ln.startswith("#"):
+                out.add(c[2])
+    return out
 
 
 def read_feedback(repo):
@@ -462,21 +474,23 @@ def band(d):
     return "low" if d < 2.5 else ("high" if d >= 3.5 else "mid")
 
 
-def outcomes(rows, tasks, feedback, models):
-    """구현 투입(new·retry) 하나마다 결과 점수 0~1.
+def outcomes(rows, tasks, feedback, models, skip=None):
+    """구현 투입(new·handoff·retry) 하나마다 결과 점수 0~1. skip: 셈에서 뺄 dispatch(한도 전환으로 멈춘 것 — 품질 실패가 아니다).
+    handoff(한도 전환 이어받기)는 새 투입처럼 센다.
     merged 작업: 마지막 새 투입 1(뒤에 retry가 있으면 0.6), 그 전 새 투입 0(다시 띄웠으니 실패), retry는 마지막 1·앞 0.5.
     todo/ready로 되돌아간 작업: 그 투입들 0. running/review: 마지막은 미정, 그 전 새 투입 0.
     route_feedback.tsv(검토 판정)는 그 시각 이전의 마지막 구현 투입 점수를 덮는다."""
     by = {}
+    skip = skip or set()
     for r in rows:
-        if r["kit_id"] and r["mode"] in ("new", "retry"):
+        if r["kit_id"] and r["mode"] in ("new", "retry", "handoff") and r["did"] not in skip:
             by.setdefault(r["kit_id"], []).append(r)
     res = []
     for tid, rs in by.items():
         rs.sort(key=lambda r: r["ts"])
         st = str((tasks.get(tid) or {}).get("status", "")).lower()
         scores = {}
-        fresh = [r for r in rs if r["mode"] == "new"]
+        fresh = [r for r in rs if r["mode"] in ("new", "handoff")]
         retr = [r for r in rs if r["mode"] == "retry"]
         if st == "merged":
             for r in fresh[:-1]:
@@ -534,7 +548,7 @@ def running_by_agent(rows, tasks, live_dids=None):
         return cnt
     last = {}
     for r in rows:
-        if r["kit_id"] and r["mode"] == "new":
+        if r["kit_id"] and r["mode"] in ("new", "handoff"):
             last[r["kit_id"]] = r
     for tid, r in last.items():
         if str((tasks.get(tid) or {}).get("status", "")).lower() == "running" and r["agent"]:
@@ -593,7 +607,8 @@ def orca_usage(days=7):
 # 창마다 usedPercent·windowMinutes·resetsAt. Claude는 Fable 주간(fableWeekly)을 따로, Antigravity는 모델 묶음(buckets.group)별로 센다.
 # 숫자만 state/quota_cache.json에 5분 캐시한다(계정 이메일 등은 읽지도 남기지도 않는다).
 QUOTA_TTL = 300
-QUOTA_DEFAULT = {"enabled": True, "hard_percent": 98, "session_soft": 70, "pace_margin": 10, "use_it_hours": 24}
+QUOTA_DEFAULT = {"enabled": True, "hard_percent": 98, "session_soft": 70, "pace_margin": 10, "use_it_hours": 24,
+                 "on_exhausted": "switch", "wait_minutes": 30}   # 한도 정지 워커: switch(다른 구독으로 이어받기) | wait
 
 
 def quota_cfg(pol):
@@ -720,6 +735,21 @@ def quota_effect(m, agents, quota, pol, now=None):
                 adj += 0.5
                 why.append(f"{label} {100 - w['used']:.0f}% 남고 {left_h:.0f}시간 뒤 초기화")
     return None, adj, why
+
+
+def exhausted(m, agents, quota, min_used=100.0, now=None):
+    """그 모델을 막고 있는 창 [(이름표, 사용률, 초기화 시각)] — 정지 점검·한도 전환이 쓴다(min_used 이상, 아직 초기화 전)."""
+    mw = model_windows(m, agents, quota)
+    if not mw:
+        return []
+    prov, wins, _ = mw
+    now = now or time.time()
+    out = []
+    for name, w in sorted(wins.items()):
+        if w["used"] >= min_used and (not w["resets"] or w["resets"] > now):
+            short = bool(w["minutes"]) and w["minutes"] <= 600
+            out.append((f"{prov} " + ("세션" if short else ("Fable 주간" if name == "fableWeekly" else "주간")), w["used"], w["resets"]))
+    return out
 
 
 def today_tokens(usage, agent):
@@ -1020,9 +1050,9 @@ def score(key, m, c, pol, ctx):
     if key in ctx["failed"]:
         s -= 2.5
         why.append("이 작업에서 실패한 모델")
-    if ctx.get("avoid_agent") and m.get("agent") == ctx["avoid_agent"]:
+    if m.get("agent") in (ctx.get("avoid_agents") or []):
         s -= 3
-        why.append(f"교차 검토(구현 {ctx['avoid_agent']})")
+        why.append(f"교차 검토(구현 {m.get('agent')})")
     return s, why
 
 
@@ -1036,17 +1066,18 @@ def route(repo, cfg, tid, tasks, mode="new", live_dids=None, refresh=False, cata
     catalog = resolve_catalog(catalog, disc)
     t = tasks[tid]
     rows = read_dispatch(repo, set(tasks))
-    outs = outcomes(rows, tasks, read_feedback(repo), catalog["models"])
+    outs = outcomes(rows, tasks, read_feedback(repo), catalog["models"], skip=read_switches(repo))
     fails = failed_keys(outs, tid)
     prior = len([o for o in outs if o["kit_id"] == tid and o["score"] < 0.5])
     c = classify(t, tasks, pol, mode, prior_fails=prior if mode == "new" else 0)
     jv = apply_jev(c, t, repo, pol, mode, net=jev_net)
-    impl = [r for r in rows if r["kit_id"] == tid and r["mode"] in ("new", "retry") and r["agent"]]
+    impl = [r for r in rows if r["kit_id"] == tid and r["mode"] in ("new", "retry", "handoff") and r["agent"]]
     ctx = {"objective": str(t.get("objective") or rcfg(pol, "objective", "balanced")),
            "learned": learned(outs), "running": running_by_agent(rows, tasks, live_dids),
            "usage": orca_usage(1) if rcfg(pol, "daily_soft_tokens") else {},
-           "failed": fails if mode == "new" else set(),
-           "avoid_agent": impl[-1]["agent"] if mode == "review" and impl and rcfg(pol, "cross_review", True) else None}
+           "failed": fails if mode in ("new", "handoff") else set(),
+           # 교차 검토: 이 작업의 코드를 쓴 구독 전부(한도로 이어받았으면 앞뒤 구독 모두)
+           "avoid_agents": sorted({r["agent"] for r in impl}) if mode == "review" and rcfg(pol, "cross_review", True) else []}
     for ag, n in (extra_running or {}).items():
         ctx["running"][ag] = ctx["running"].get(ag, 0) + n
     cools = read_cooldowns(repo)

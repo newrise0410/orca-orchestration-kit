@@ -126,7 +126,7 @@ L1 작업은 소속 req/*를 모두 머지하고, 모듈 스모크를 통과하�
 - `state/issues.md`: 매니저 작업 메모(정리본은 `docs/07_process/03_*`)
 - `state/dispatch.tsv`: 투입 기록(제목, task, dispatch, 워크트리, 시각, 에이전트, 모델, effort, 라우팅 키, 난이도) — `launch.sh`가 쓴다. 모델 실적 학습의 입력이다
 - `models.yaml`: 모델 자동 라우팅 정책(쓸 구독, 목표, 동시 상한, 교차 검토, 카탈로그 덮어쓰기). 모델 점수 카탈로그는 `tools/model_catalog.yaml`(키트 소유)
-- `state/route_feedback.tsv`: 검토 판정(`models.py feedback`) — 실적 학습 입력. `state/cooldown.json`(한도에 걸린 구독)·`state/models_cache.json`(CLI 모델 목록 캐시)은 기계별이라 커밋하지 않는다
+- `state/route_feedback.tsv`: 검토 판정(`models.py feedback`) — 실적 학습 입력. `state/quota_switch.tsv`·`state/handoff/`: 한도 전환 기록·이어받기 메모(`quota_switch.py`. 멈춘 투입은 실적에서 뺀다, 보존 브랜치 `wip/<ID>-quota-*`는 `cleanup_worker.sh`가 지운다). `state/cooldown.json`(한도에 걸린 구독)·`state/models_cache.json`(CLI 모델 목록 캐시)은 기계별이라 커밋하지 않는다
 - `specs/<ID>.md`: 렌더링된 명세, `specs/<ID>.extra.md`: 투입 전 인계 사항(렌더러가 끝에 붙인다), `specs/<ID>.review*.md`·`<ID>.retry-*.md`: 검토·재투입 명세
 
 ## 9. 프로젝트 덧붙임 (키트 파일을 고치지 않고 규칙을 더한다)
