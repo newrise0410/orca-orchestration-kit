@@ -239,3 +239,8 @@ v0.4.1(10장)에서 snap 설치본은 작업 폴더 신뢰 확인 창에 막혔�
 - 시험이 잡은 결함: 같은 작업을 같은 초에 두 번 넘기면 보존 브랜치 이름이 겹쳐 보존이 실패했다(시험이 가끔 실패). 이름에 dispatch 끝자리를 붙였다.
 - 실제 필터 중단 화면으로는 시험하지 못했다(일부러 만들 수 없었다). 문구 목록이 현장 CLI의 실제 차단 문구를 못 맞추면 정지 점검에 안 나온다 — 그때는 그 문구를 알려 주면 목록에 넣는다.
 
+## 21. v0.8.4: 필터 중단을 화면·메일에서 (2026-11-25)
+- 현장 보고: codex 안전 필터 안내는 transcript에 없다(`worker-read --limit 8`·`--limit 40` 모두 마지막 블록이 tool-call·tool-result). 화면과 escalation 메일(stopReason=errored)의 Last output에만 있다. 원문(메일 3통 동일): `ⓘ This content can’t be shown` / `We take extra care with some cybersecurity requests. If you’re doing authorized security work, apply for Daybreak to` …
+- `worker-read --source terminal` 실제 꼴: 작은 워커(claude haiku, keep-open)를 띄워 읽고 해제했다. `result.terminal = {handle, status, tail: [화면 줄…]}`, `result.status = {worker, terminal, liveness}`.
+- 시험 146/146(이전 139 + 7): 화면 안내 줄 판정(굽은·곧은 따옴표, 아이콘 떼기, 문장 속 인용 무시, Claude Usage Policy), 화면 끝에서 필터 중단, 메일 Last output에서 멈춘 워커의 필터 중단, 문서 인용만 있는 메일은 오류 중단, 멈춘 워커는 stop 생략하고 이어받기(codex-sol은 그 작업 후보에서 제외), 넘긴 dispatch의 메일은 다시 안 잡음, errored인데 문구 없음 → 오류 중단.
+

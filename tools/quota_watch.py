@@ -76,6 +76,7 @@ def pending(repo, cfg):
     due = [(d, waits[d]) for d in quota_switch.due_waits(waits, stalls)]
     waiting = {q["dispatch"] for q in stalls if q["dispatch"] in waits}
     filt = [dict(w, windows=[("필터 중단", 100.0, None)]) for w in s.get("turn_stops") or []]
+    filt += [dict(w, evidence="오류 중단: errored, 차단 문구 없음 — 확인 필요", windows=[]) for w in s.get("error_stops") or []]
     return [q for q in stalls if q["dispatch"] not in waiting] + filt, due
 
 

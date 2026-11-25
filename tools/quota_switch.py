@@ -216,7 +216,7 @@ def main(argv=None):
         key = w.get("key") or (routing.key_of_row({"agent": w.get("agent", ""), "model": w.get("model_id", "")}, rcat["models"]) or "")
         stalls.append({"dispatch": w["dispatch"], "kit_id": w.get("kit_id"), "title": w.get("title"), "mode": w.get("mode") or "new",
                        "agent": w.get("agent", ""), "key": key, "workspace": w.get("workspace"), "windows": [], "resets": None,
-                       "kind": "filter", "evidence": w.get("evidence", "")})
+                       "kind": "filter", "evidence": w.get("evidence", ""), "state": w.get("state"), "liveness": w.get("liveness")})
     if a.ids:
         stalls = [x for x in stalls if x["kit_id"] in a.ids]
     live = {w["dispatch"] for w in o.get("workers") or []}
@@ -267,11 +267,15 @@ def main(argv=None):
             for st in steps:
                 print(f"  (dry-run) {st}")
             continue
-        ok, err = orca("orchestration", "worker-stop", "--dispatch", q["dispatch"])
-        if not ok:
-            print(f"  worker-stop 실패: {err} — 전환하지 않는다(워커가 아직 돌 수 있다)", file=sys.stderr)
-            rc = 1
-            continue
+        stopped = str(q.get("state")) in kitlib.SETTLED_WORKER_STATES or str(q.get("liveness")) == "exited"
+        if stopped:
+            print(f"  워커는 이미 멈췄다({q.get('state')}/{q.get('liveness')}) — worker-stop 생략")
+        else:
+            ok, err = orca("orchestration", "worker-stop", "--dispatch", q["dispatch"])
+            if not ok:
+                print(f"  worker-stop 실패: {err} — 전환하지 않는다(워커가 아직 돌 수 있다)", file=sys.stderr)
+                rc = 1
+                continue
         try:
             ref = next((r for r in (base, f"origin/{base}") if base and git(ws, "rev-parse", "-q", "--verify", r, check=False)), "")
             snap = snapshot(ws, tid, ref, reason, q["dispatch"])

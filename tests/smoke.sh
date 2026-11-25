@@ -356,9 +356,18 @@ if a.startswith("account list"):
         **{p: dict({"provider": p, "status": "ok", "weekly": ok(10, 10080, now + 100 * h)},
                    **({"session": ok(60, 300, now + 200 * 60 * 1000)} if tight else {})) for p in ("claude", "grok", "antigravity")}}}})
 if "worker-list" in a:
-    out({"ok": True, "result": {"workers": [{"dispatchId": os.environ.get("FAKE_SW_DID", "ctx_5a1"), "taskId": "task_5a1", "state": "running",
-                                             "liveness": "alive", "workspace": "ws-5a1::" + os.environ["FAKE_SW_WT"]}]}})   # Orca 실제 꼴: <워크스페이스 ID>::<경로>
+    ws = [{"dispatchId": os.environ.get("FAKE_SW_DID", "ctx_5a1"), "taskId": "task_5a1", "state": "running",
+           "liveness": "alive", "workspace": "ws-5a1::" + os.environ["FAKE_SW_WT"]}]
+    if os.environ.get("FAKE_SW_MAIL_DID"):   # escalation을 보낸(이미 멈춘) 워커
+        ws.append({"dispatchId": os.environ["FAKE_SW_MAIL_DID"], "taskId": "task_5a1", "state": "failed", "liveness": "exited",
+                   "workspace": "ws-5a1::" + os.environ["FAKE_SW_WT"]})
+    out({"ok": True, "result": {"workers": ws}})   # Orca 실제 꼴: <워크스페이스 ID>::<경로>
 if "task-list" in a: out({"ok": True, "result": {"tasks": [{"id": "task_5a1", "title": os.environ.get("FAKE_SW_TITLE", "X-SW")}]}})
+if "worker-read" in a and "--source terminal" in a:
+    scr = ["› 경계 입력을 만든다", "ⓘ This content can’t be shown", "  We take extra care with some cybersecurity requests. If you’re doing authorized", "› gpt-6.2-sol"] \
+        if os.environ.get("FAKE_SW_SCREEN") == "filter" else ["› 시험을 돌린다", "ok"]
+    out({"ok": True, "result": {"source": "terminal", "terminal": {"handle": "term_x", "status": "running", "tail": scr},
+                                "status": {"worker": "running", "terminal": "running", "liveness": "live"}}})   # Orca 실제 꼴
 if "worker-read" in a:
     rd = os.environ.get("FAKE_SW_READ", "")
     last = "API Error: Claude Code is unable to respond to this request, which appears to violate our Usage Policy." if rd == "filter" else "경계값 시험을 추가했다. 다음은 시험 실행."
@@ -366,7 +375,15 @@ if "worker-read" in a:
             {"role": "tool", "blocks": [{"type": "tool-result", "output": "README: 이 도구는 usage policy를 따른다" if rd == "toolonly" else "ok"}]},
             {"role": "assistant", "blocks": [{"type": "text", "text": last}]}]
     out({"ok": True, "result": {"transcript": {"messages": msgs}}})
-if "inbox" in a: out({"ok": True, "result": {"messages": []}})
+if "inbox" in a:
+    mail = os.environ.get("FAKE_SW_MAIL", "")
+    lo = {"filter": "› 경계 입력 시험을 이어 간다\n\nⓘ This content can’t be shown\n  We take extra care with some cybersecurity requests. If you’re doing authorized security work, apply for Daybreak to\n  get broader access.\n  Learn more: https://help.openai.com/en/articles/20001326\n\n› gpt-6.2-sol · 41% context left",
+          "noise": "문서 3.2절: 차단되면 화면에 'This content can’t be shown'이 뜬다고 적혀 있다\n› 다음 절로 간다",
+          "errored": "Error: stream disconnected before completion\n› 다시 시도하려면 Enter"}.get(mail)
+    msgs = [{"id": "msg_e5c1", "type": "escalation", "handled": True, "subject": "Worker stopped on an error without reporting",
+             "body": "Worker stopped on an error without reporting (stopReason=errored).\nLast output:\n" + lo,
+             "payload": {"dispatchId": os.environ.get("FAKE_SW_MAIL_DID", ""), "taskId": "task_5a1", "stopReason": "errored"}}] if lo else []
+    out({"ok": True, "result": {"messages": msgs}})
 if "worker-stop" in a or "worker-release" in a or a.startswith("orchestration send"): out({"ok": True, "result": {}})
 if a.startswith("automations create"): out({"ok": True, "result": {"automation": {"id": "auto-1", "enabled": True}}})
 if a.startswith("automations show"): out({"ok": True, "result": {"automation": {"id": "auto-1", "name": "t", "enabled": True}}})
@@ -512,6 +529,31 @@ cfg=kitlib.load_config('.'); _,t=kitlib.all_tasks('.',cfg)
 assert routing.read_filter_blocks('.').get('X-SW')=={'claude-sonnet'}
 d=routing.route('.',cfg,'X-SW',t,'new',quota={}); assert d['excluded'].get('claude-sonnet')=='이 작업에서 안전 필터로 끊긴 모델', d['excluded']
 d=routing.route('.',cfg,'X-DOC',t,'new',quota={}); assert 'claude-sonnet' not in d['excluded'] or '필터' not in d['excluded']['claude-sonnet']"
+# codex 안전 필터는 응답 블록이 아니라 화면에만 찍힌다(현장): 화면 끝·escalation 메일의 Last output에서, 고정 안내 줄과 줄 전체가 맞을 때만
+check "화면 안내 줄: 굽은·곧은 따옴표, 아이콘 떼고 줄 전체 · 문장 속 인용은 무시" python3 -c "
+import sys; sys.path.insert(0,'$T'); import status
+f=status.screen_match
+assert f('ⓘ This content can’t be shown') == 'This content can’t be shown'
+assert f(\"  This content can't be shown\") and f('  We take extra care with some cybersecurity requests. If you’re doing authorized security work, apply')
+assert f('문서 3.2절: 차단되면 화면에 This content can’t be shown이 뜬다') is None and f('see: This content can’t be shown here') is None
+assert f('API Error: Claude Code is unable to respond to this request, which appears to violate our Usage Policy (https://x)')"
+printf 'X-SW\ttask_5a5\tctx_5a5\tx-sw\t2026-12-30 10:00:00\tcodex\tgpt-6.2-sol\thigh\tcodex-sol\t3.0\t\n' >> orchestration/state/dispatch.tsv
+rm -f orchestration/state/quota_cache.json
+o=$(FAKE_SW=free FAKE_SW_DID=ctx_5a5 FAKE_SW_SCREEN=filter $SW python3 $T/status.py --stall 2>&1)
+check "필터 중단(화면): 응답 블록에 없어도 터미널 화면 끝에서 잡는다" has "$o" "필터 중단 X-SW (ctx_5a5): \"This content can’t be shown\" (화면)"
+printf 'X-SW\ttask_5a4\tctx_5a4\tx-sw\t2026-12-31 10:00:00\tcodex\tgpt-6.2-sol\thigh\tcodex-sol\t3.0\t\n' >> orchestration/state/dispatch.tsv
+o=$(FAKE_SW=free FAKE_SW_DID=ctx_9z9 FAKE_SW_MAIL=noise FAKE_SW_MAIL_DID=ctx_5a4 $SW python3 $T/status.py --stall 2>&1)
+check "메일 Last output: 문서 속 인용은 필터 중단이 아니라 오류 중단(확인 필요)" bash -c '! grep -q "필터 중단" <<<"$0" && grep -q "오류 중단 X-SW (ctx_5a4): Orca escalation stopReason=errored" <<<"$0"' "$o"
+: > "$W/sw/calls.log"
+o=$(FAKE_SW=free FAKE_SW_DID=ctx_9z9 FAKE_SW_MAIL=filter FAKE_SW_MAIL_DID=ctx_5a4 $SW python3 $T/status.py --stall 2>&1)
+check "필터 중단(메일): 멈춘 워커도 escalation의 Last output으로 잡는다" has "$o" "필터 중단 X-SW (ctx_5a4): \"This content can’t be shown\" (메일 Last output)"
+o=$(FAKE_SW=free FAKE_SW_DID=ctx_9z9 FAKE_SW_MAIL=filter FAKE_SW_MAIL_DID=ctx_5a4 $SW python3 $T/quota_switch.py 2>&1)
+check "필터 중단(메일): 이미 멈춘 워커는 stop 생략 · 이어받기 · codex-sol은 이 작업 후보에서 뺌" bash -c 'grep -q "^\[전환\] X-SW (ctx_5a4, codex-sol): 필터 중단" <<<"$0" && grep -q "worker-stop 생략" <<<"$0" && ! grep -q "worker-stop --dispatch ctx_5a4" "$1/calls.log" && grep -q "worker-start" "$1/calls.log" && ! grep -q -- "worker-start .*--model gpt-6.2-sol" "$1/calls.log" && tail -1 orchestration/state/quota_switch.tsv | grep -q "	ctx_5a4	codex	codex-sol	.*	filter$"' "$o" "$W/sw"
+o=$(FAKE_SW=free FAKE_SW_DID=ctx_9z9 FAKE_SW_MAIL=filter FAKE_SW_MAIL_DID=ctx_5a4 $SW python3 $T/status.py --stall 2>&1)
+check "넘긴 dispatch의 메일은 다시 잡지 않는다" bash -c '! grep -q "ctx_5a4" <<<"$0"' "$o"
+printf 'X-SW\ttask_5a7\tctx_5a7\tx-sw\t2027-01-01 10:00:00\tcodex\tgpt-6.2-sol\thigh\tcodex-sol\t3.0\t\n' >> orchestration/state/dispatch.tsv
+o=$(FAKE_SW=free FAKE_SW_DID=ctx_9z9 FAKE_SW_MAIL=errored FAKE_SW_MAIL_DID=ctx_5a7 $SW python3 $T/status.py --stall 2>&1)
+check "오류 중단: errored인데 한도도 차단 문구도 아니면 확인하라고 알림" has "$o" "오류 중단 X-SW (ctx_5a7)"
 unset FAKE_SW_DID FAKE_SW_TITLE
 $M cooldown claude --min 1440 --reason 'Orca에서 꺼진 에이전트' >/dev/null   # 위에서 푼 쿨다운을 되돌린다(뒤 대시보드 시험이 쓴다)
 cp "$W/models.yaml.pre-sw" orchestration/models.yaml; cp "$W/kit.yaml.pre-sw" orchestration/kit.yaml
