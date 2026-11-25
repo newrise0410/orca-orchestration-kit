@@ -10,7 +10,7 @@ AI 에이전트 다중 세션으로 소프트웨어를 개발하는 워크플로
 - 단일 HTML 대시보드(오프라인, 작업 보드), 실행 격리 모듈(선택), 검토 단계 모듈(선택)
 - 배포: Claude Code 플러그인 마켓플레이스(자동 업데이트) 또는 심볼릭 링크
 
-버전: **v0.7.0** (2026-11-25) · 라이선스: [Apache-2.0](LICENSE)
+버전: **v0.8.0** (2026-11-25) · 라이선스: [Apache-2.0](LICENSE)
 
 ---
 
@@ -114,6 +114,8 @@ python3 orchestration/tools/validate_dag.py              # DAG 수정 후 항상
 orchestration/tools/launch.sh R-API-001 R-WEB-001        # 선행·status·기준 브랜치 확인 → 모델 자동 라우팅 → 렌더링 → task-create → worker-start → running
 python3 orchestration/tools/models.py plan               # 투입 가능 작업의 구독·모델·effort 배분 미리보기 (route <ID>: 근거, discover: 쓸 수 있는 모델, stats: 실적·사용량)
 python3 orchestration/tools/models.py cooldown codex --min 120   # 사용량 한도에 걸린 구독을 잠시 뺀다
+python3 orchestration/tools/quota_watch.py install       # (운영 시작 때 한 번) Orca 예약 실행: 10분마다 사전 확인만, 한도 정지·풀림이 있으면 매니저에 메일 (remove로 해제)
+python3 orchestration/tools/quota_switch.py [--dry-run]  # 정지 점검의 '한도 정지' 워커: 진행분 보존 → 정리 → 다른 구독으로 이어받기 (곧 풀리면·검토 독립성을 못 지키면 대기)
 python3 orchestration/tools/models.py quota              # 구독별 잔여 한도(Orca 집계)와 라우팅 영향: 소진이면 초기화까지 제외, 빠듯하면 벌점
 python3 orchestration/tools/models.py bench [--aa]       # 품질 근거(Terminal-Bench, 선택 Artificial Analysis) 다시 받기·카탈로그 추정과 비교
 python3 orchestration/tools/models.py update [--check]   # 구독 CLI 업데이트 → 모델 목록 다시 읽기 → 카탈로그 계열 대조 (launch.sh가 하루 한 번 자동으로 한다)
@@ -136,7 +138,7 @@ orchestration/tools/dashboard/serve.sh --orca            # 대시보드
 |---|---|---|---|
 | 세션 체계 | `templates/sessions/` | `orchestration/sessions/`, `orchestration/templates/` | `MASTER.md`, `MANAGER.md`(상시 핵심), `procedures/merge-gate.md`·`review.md`(필요할 때 읽는 절차), `worker-spec.md`(L2), `integration-spec.md`(L1), `review-spec.md`(검토). 프로젝트 규칙은 `*.local.md` 덧붙임 |
 | 작업 DAG | `templates/orchestration/tasks.yaml`, `tools/` | `orchestration/` | 스키마 주석(`hold`·`agent/model/effort` 포함), `validate_dag.py`, `render_spec.py`(`--review`·`--retry`), `launch.sh`(=`launch.py`), `status.py`(정지 점검), `archive_tasks.py`, `task_status.py`, `cleanup_worker.sh`(4조건), `sync_main.sh` |
-| 모델 라우팅 | `tools/routing.py`, `models.py`, `model_catalog.yaml`, `templates/orchestration/models.yaml` | `orchestration/tools/`, `orchestration/models.yaml` | 작업마다 구독(Claude·Codex·Antigravity·Grok CLI, Orca `--agent`)·모델·effort 자동 선택. 난이도·태그 분류 → 능력·소모·속도·강점 점수 → 투입 결과 학습·검토 판정 반영, 구독별 동시 상한·쿨다운·교차 검토, Orca 사용량 집계 참고. 근거를 한 줄로 남긴다. 선택: JEV 난이도 판정(`jev:`, 기본 꺼짐, shadow → live). 구독 CLI 자동 업데이트(`routing.auto_update`, 하루 한 번)와 모델 계열 따라가기(`family:`, 가장 높은 판). 품질 = 공개 벤치마크(Terminal-Bench 4.1, CLI × 모델), 잔여 한도(Orca rateLimits: 소진 제외·빠듯 벌점) |
+| 모델 라우팅 | `tools/routing.py`, `models.py`, `model_catalog.yaml`, `templates/orchestration/models.yaml` | `orchestration/tools/`, `orchestration/models.yaml` | 작업마다 구독(Claude·Codex·Antigravity·Grok CLI, Orca `--agent`)·모델·effort 자동 선택. 난이도·태그 분류 → 능력·소모·속도·강점 점수 → 투입 결과 학습·검토 판정 반영, 구독별 동시 상한·쿨다운·교차 검토, Orca 사용량 집계 참고. 근거를 한 줄로 남긴다. 선택: JEV 난이도 판정(`jev:`, 기본 꺼짐, shadow → live). 구독 CLI 자동 업데이트(`routing.auto_update`, 하루 한 번)와 모델 계열 따라가기(`family:`, 가장 높은 판). 품질 = 공개 벤치마크(Terminal-Bench 4.1, CLI × 모델), 잔여 한도(Orca rateLimits: 소진 제외·빠듯 벌점). 한도 전환(`quota_switch.py`: 한도로 멈춘 워커를 다른 구독으로 이어받기) |
 | 운영 보호 | `tools/` | `orchestration/tools/` | `slot.sh`(동시 실행 슬롯), `evidence_lint.py`(증적 위생), `hooks/pre-push` + `install_hooks.sh`(로컬 전용·보호 브랜치·배포 제한 파일) |
 | 구조·규약 | `templates/orchestration/README.md` | `orchestration/README.md` | 계층, 브랜치·머지, 웨이브, 쓰기 범위 소유권 표, 동시 실행, 완료 기준, 소통, 종료 정리 |
 | 공통 규칙 | `templates/AGENTS.md`, `CLAUDE.md` | 저장소 루트 | 개인 이메일 금지, 배포 제한 파일 금지, 컨테이너 빌드, 쓰기 범위 밖은 ask |
@@ -228,6 +230,7 @@ docs/                            VERIFY.md  DESIGN-NOTES.md  LESSONS.md
 
 | 버전 | 일자 | 내용 |
 |---|---|---|
+| v0.8.0 | 2026-11-25 | **한도 전환**: 정지 점검(`status.py --stall`)이 도는 워커의 구독(그 모델의 창)이 한도 100%면 `한도 정지`로 알린다. `quota_switch.py`가 매니저가 손으로 하던 절차를 한 번에 한다: worker-stop → 진행분(커밋 + 커밋하지 않은 변경)을 임시 브랜치 `wip/<ID>-quota-<시각>`에 스냅샷(작업 브랜치·작업 트리는 그대로) → worker-release → 같은 워크트리에서 `launch.sh --handoff`(새 모드: 이어받기 명세, 작업 항목의 모델 고정은 쓰지 않고 라우팅이 한도 찬 모델을 뺀다). 대기 판정: 설정 `routing.quota.on_exhausted: wait`(기본 switch), 막은 창이 `wait_minutes`(기본 30분) 안에 풀림, 다른 구독도 한도, 검토 워커인데 남은 후보가 구현한 구독뿐(검토 독립성). 멈춘 투입은 실적에서 빼고 handoff는 새 투입처럼 센다. 교차 검토는 이어받기 앞뒤 구독을 모두 피한다. `cleanup_worker.sh`가 머지 뒤 보존 브랜치도 지운다. **대기 뒤 재개**: 대기 판정이면 풀리는 시각을 기록하고, 그 뒤 `quota_switch.py`가 워커에 '이어서 하라'를 보낸다(정지 점검 '한도 풀림'). **예약 점검** `quota_watch.py install`: Orca 예약 실행(10분)의 사전 확인만 써서 할 일이 있으면 매니저 Run에 메일을 보내 깨우고, 사전 확인이 언제나 1로 끝나 에이전트는 띄우지 않는다(구독 소모 없음) |
 | v0.7.0 | 2026-11-25 | **잔여 한도 라우팅**: Orca가 모으는 구독별 사용률(`orca account list --json`의 rateLimits: 5시간 세션·주간·Claude Fable 주간·Antigravity 모델 묶음)을 5분 캐시해 본다. 창 하나라도 98% 이상이면 초기화까지 제외(다른 계정에 여유가 있으면 알림), 세션 70% 넘으면 벌점, 주간이 기간보다 앞서 쓰이면 벌점, 곧 초기화되는데 많이 남으면 가점. 쓸 수 있는 구독이 모두 소진이면 launch.sh가 보류. 대시보드 구독 칩에 사용률. `models.py quota`. **품질 = 공개 벤치마크**: `models.py bench`가 Terminal-Bench 4.1(CLI 에이전트 × 모델 × effort 공식 리더보드)에서 카탈로그에 맞는 줄만 `bench_scores.yaml`에 출처와 함께 남기고, 품질 = 5 × 해결률/최고 해결률. 다른 CLI의 점수는 빌리지 않고, 새 판에 점수가 없으면 바로 아래 판 점수를 쓴다. Artificial Analysis 무료 API는 키(`AA_API_KEY`)가 있을 때만 참고값으로. **동점 규칙**: 점수가 같으면(부동소수 오차 포함) 부하 → 이 대역 실적 → 소모 → 품질 → 키 이름 순으로 가리고 근거에 남긴다(전에는 카탈로그 순서·오차가 갈랐다). 임계 경로 작업의 실적 조회 대역을 기록 대역과 맞췄다. **구독 CLI 자동 업데이트**: `launch.sh`가 하루 한 번(`routing.auto_update: daily`, weekly·off) 워커를 띄우기 전에 각 CLI의 자체 업데이트(`claude/codex/agy/grok update`)를 돌리고 모델 목록을 다시 읽는다. 수동은 `models.py update [--check]`. snap 설치본은 건너뛴다. **카탈로그 계열 따라가기**: `family: gpt-{v}-sol`처럼 적은 항목은 CLI 목록에서 가장 높은 판을 쓴다(effort가 ID에 든 계열은 `{effort}`). `discover`는 계열 옛 판을 알림에서 빼고 새 계열만 알린다. 프로젝트가 `models.yaml`에서 model을 정하면 그 항목은 고정. **카탈로그 정리**: Antigravity는 Gemini 4 Neon·Carbon과 claude-opus-5-5(3.8 Flash 뺌), Grok은 grok-4.7 하나(effort low~high, build-fast 뺌), Codex는 계열로 6.2판을 쓴다. Antigravity는 공식 설치본(`curl -fsSL https://antigravity.google/cli/install.sh \| bash`)을 권한다 |
 | v0.6.0 | 2026-11-24 | **W0 초안에 기획 두 단계를 기본으로 넣었다**(교훈 L-20): `F-00a` 기획(요구 정리·기능 정의·구조 설계 초안, 마스터가 사용자 요구를 넘길 때까지 hold) → `F-00b` 유사 오픈소스 조사·반영(라이선스·최근 활동·겹치는 요구, 직접 구현 대 가져다 쓰기 대 토대로 삼기 비교, 사용자 결정이 필요한 변경은 제안으로) → `F-01` 계약. init 흐름(`references/init.md`)과 매니저 명세가 '사용자 결정 확정 뒤 F-01'을 따른다. **기존 설치본:** tasks.yaml은 프로젝트 소유라 바뀌지 않는다. 아직 계약 전이면 두 작업을 손으로 넣는다. 검증: `docs/VERIFY.md` 14장 |
 | v0.5.2 | 2026-11-24 | **결함:** 키트가 `.gitignore`에 넣던 `dashboard/`가 저장소 루트의 대시보드 출력뿐 아니라 `orchestration/tools/dashboard/`(대시보드 도구)까지 무시해서, 도구가 프로젝트 git에 올라가지 않았다(새로 받은 클론에 도구가 없고 upgrade로 바뀐 도구가 이력에 남지 않는다) → `/dashboard/`로 고쳤다. `upgrade`가 `.gitignore`의 키트 블록을 매니페스트 목록과 맞춘다(블록 밖의 줄은 그대로, v0.5.0에서 늘어난 `jev_cache.json` 줄도 이때 들어간다). **기존 설치본:** `upgrade --apply` 뒤 `git add orchestration/tools/dashboard`로 도구를 올린다. 검증: `docs/VERIFY.md` 13장 |

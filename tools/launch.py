@@ -5,6 +5,7 @@
   orchestration/tools/launch.sh [옵션] <작업ID> [작업ID ...]
   orchestration/tools/launch.sh --review <작업ID>                 # 구현 검토 워커 (보고서 브랜치 req/<ID>-RV, 메인 기준)
   orchestration/tools/launch.sh --retry 지적.md --suffix r1 <작업ID> # req/<ID>에서 남은 지적 수정
+  (한도 전환 이어받기 --handoff 메모 --suffix h1 --worktree path:<멈춘 워커 워크트리> 는 quota_switch.py가 부른다)
 옵션:
   --dry-run            Orca 명령을 실행하지 않고 출력만
   --force              선행 작업·status 확인을 건너뛴다(사유를 issues.md에 남겨라)
@@ -97,6 +98,7 @@ def main(argv=None):
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--review", action="store_true")
     g.add_argument("--retry", metavar="NOTES")
+    ap.add_argument("--handoff", metavar="NOTES", help="한도 전환 이어받기(quota_switch.py가 부른다): 멈춘 워커의 워크트리(--worktree path:..)에서 이어서")
     ap.add_argument("--suffix", default="")
     ap.add_argument("--agent"), ap.add_argument("--model"), ap.add_argument("--effort")
     ap.add_argument("--worktree", default=os.environ.get("KIT_WORKTREE") or "new-top-level")
@@ -106,6 +108,8 @@ def main(argv=None):
     a = ap.parse_args(argv)
     if a.retry and not a.suffix:
         sys.exit("--retry에는 --suffix(예: r1)가 필요하다")
+    if a.handoff and (a.retry or not a.suffix):
+        sys.exit("--handoff에는 --suffix(예: h1)가 필요하고 --retry와 함께 쓰지 않는다")
     repo = kitlib.repo_root()
     os.chdir(repo)
     cfg = kitlib.load_config(repo)
@@ -141,7 +145,7 @@ def main(argv=None):
         if t is None:
             print(f"  알 수 없는 작업 {tid}", file=sys.stderr)
             return 1
-        mode = "review" if a.review else ("retry" if a.retry else "new")
+        mode = "review" if a.review else ("retry" if a.retry else ("handoff" if a.handoff else "new"))
         # ── 투입 조건
         if mode == "new" and not a.force:
             why = []
@@ -169,6 +173,8 @@ def main(argv=None):
             base, title = main_b, f"{tid}-RV" + (f"-{a.suffix}" if a.suffix else "")
         elif mode == "retry":
             base, title = b, f"{tid} retry-{a.suffix}"
+        elif mode == "handoff":
+            base, title = b, f"{tid} handoff-{a.suffix}"
         else:
             base, title = (b if b.startswith(ip) else (t.get("base") or main_b)), tid
         new_wt = a.worktree in NEW_WT
@@ -177,7 +183,7 @@ def main(argv=None):
             rc = 1
             continue
         rargs = [tid] + (["--review"] if mode == "review" else []) + (["--retry", a.retry] if a.retry else []) \
-            + (["--suffix", a.suffix] if a.suffix else [])
+            + (["--handoff", a.handoff] if a.handoff else []) + (["--suffix", a.suffix] if a.suffix else [])
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             if render_spec.main(rargs) != 0:
@@ -190,6 +196,8 @@ def main(argv=None):
             agent = a.agent or os.environ.get("KIT_REVIEW_AGENT") or rv.get("agent")
             model = a.model or os.environ.get("KIT_REVIEW_MODEL") or rv.get("model")
             effort = a.effort or os.environ.get("KIT_REVIEW_EFFORT") or rv.get("effort")
+        elif mode == "handoff":   # 한도로 멈춘 구독을 다시 고르지 않게 작업 항목의 고정(agent/model/route)은 쓰지 않는다
+            agent, model, effort = a.agent, a.model, a.effort
         else:
             agent = a.agent or os.environ.get("KIT_AGENT") or t.get("agent")
             model = a.model or t.get("model")
@@ -197,7 +205,7 @@ def main(argv=None):
         rkey, rdiff, rjev = "", "", ""
         catalog, pol = routing.load(repo)
         catalog = routing.resolve_catalog(catalog, routing.discover(repo, catalog))
-        pinned = t.get("route") if mode != "review" else None
+        pinned = t.get("route") if mode not in ("review", "handoff") else None
         if pinned and not (agent or model):
             m = catalog["models"].get(str(pinned))
             if m is None:
@@ -234,7 +242,7 @@ def main(argv=None):
             print("  참고: model 없이 effort는 쓸 수 없어 effort를 뺀다", file=sys.stderr)
             effort = None
         name = re.sub(r"[^a-z0-9._-]", "-", title.lower())
-        keep = a.keep_open or str(t.get("layer")) == "L1" and mode == "new"
+        keep = a.keep_open or str(t.get("layer")) == "L1" and mode in ("new", "handoff")
         # ── Orca
         code, out = run([orca(), "orchestration", "task-create", "--run", run_id, "--spec-file", spec,
                          "--task-title", title, "--display-name", title, "--json"], a.dry_run)

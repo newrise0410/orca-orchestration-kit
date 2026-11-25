@@ -6,6 +6,8 @@
 옵션: --warnings(DAG 경고 목록) --limit N(메시지 수, 기본 10) --stale-min M(커밋 없음 기준 분, 기본 60) --no-orca --json
 
 정지 점검 판정 (한 줄씩, 이상이 없으면 '정상'):
+  한도 정지   워커가 도는 구독(그 모델의 창)이 사용량 한도 100% → quota_switch.py (자동 전환, 곧 풀리면 대기)
+  한도 풀림   대기로 둔 워커의 한도가 풀렸다 → quota_switch.py가 '이어서 하라'를 보낸다
   attention   Orca가 워커에 주의 표시(입력 대기 프롬프트 등) → worker-show / worker-read로 원인 확인
   커밋 없음    진행 중인데 마지막 커밋이 stale-min보다 오래됨 → worker-read로 화면 끝 확인
   running 고아 tasks.yaml은 running인데 진행 중 워커가 없음 → 끝났으면 review/merged, 멈췄으면 재투입
@@ -136,12 +138,43 @@ def collect(repo, cfg, a):
         for w in o["workers"]:
             r = rows.get(w["dispatch"]) or {}
             w["model"] = (r.get("key") or r.get("model") or "") if r else ""
+            w["agent"], w["key"], w["mode"] = r.get("agent", ""), r.get("key", ""), r.get("mode", "")
+            w["model_id"] = r.get("model", "")
             if r.get("agent"):
                 by[r["agent"]] = by.get(r["agent"], 0) + 1
+        out["quota_stalls"] = quota_stalls(repo, catalog, pol, o["workers"])
+        try:
+            out["quota_waits"] = json.loads((routing.state_dir(repo) / "quota_wait.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            out["quota_waits"] = {}
         out["models"] = {"enabled": routing.enabled(pol), "running": by,
                          "caps": routing.rcfg(pol, "max_concurrent") or {}, "cooldowns": routing.read_cooldowns(repo)}
     except Exception as e:  # noqa: BLE001 — 현황은 라우팅 설정이 깨져도 나와야 한다
         out["models"] = {"error": str(e)[:160]}
+    return out
+
+
+def quota_stalls(repo, catalog, pol, workers, quota=None):
+    """한도가 찬 구독에서 도는 워커 → [{dispatch, kit_id, mode, agent, key, windows[(이름표, 사용률, 초기화)], resets}].
+    모델 키가 없으면(직접 고른 agent/model) 공급자 공통 창만 본다. 한도를 못 읽으면 빈 목록."""
+    if not routing.quota_cfg(pol)["enabled"]:
+        return []
+    quota = routing.read_quota(repo) if quota is None else quota
+    if not quota:
+        return []
+    rcat = routing.resolve_catalog(catalog, routing.discover(repo, catalog))
+    out = []
+    for w in workers:
+        if not w.get("agent"):
+            continue
+        key = w.get("key") or routing.key_of_row({"agent": w["agent"], "model": w.get("model_id", "")}, rcat["models"])
+        m = rcat["models"].get(key) if key else None
+        ex = routing.exhausted(m or {"agent": w["agent"]}, rcat["agents"], quota)
+        if ex:
+            resets = [r for _, _, r in ex if r]
+            out.append({"dispatch": w["dispatch"], "kit_id": w.get("kit_id"), "title": w.get("title"), "mode": w.get("mode") or "new",
+                        "agent": w["agent"], "key": key or "", "workspace": w.get("workspace"), "windows": ex,
+                        "resets": max(resets) if resets else None})
     return out
 
 
@@ -151,12 +184,25 @@ def stall_lines(s, stale_min):
         return ["(Orca 조회 안 함: --no-orca)"]
     lines = []
     now = time.time()
+    qs = {q["dispatch"]: q for q in s.get("quota_stalls") or []}
     for w in o["workers"]:
         who = f"{w['kit_id'] or w['title'] or '?'} ({w['dispatch']})"
-        if w["attention"]:
+        if w["dispatch"] in qs:
+            q = qs[w["dispatch"]]
+            win = ", ".join(f"{lab} {u:.0f}%" + (f"({routing._hm(r)} 초기화)" if r else "") for lab, u, r in q["windows"])
+            wt = (s.get("quota_waits") or {}).get(w["dispatch"])
+            lines.append(f"한도 정지 {who}: {win} · {q['key'] or q['agent']} → "
+                         + (f"대기 중({routing._hm(wt['resets'])}에 풀리면 재개 메시지)" if wt and wt.get("resets")
+                            else "python3 orchestration/tools/quota_switch.py (자동 전환, 곧 풀리면 대기)"))
+        elif w["attention"]:
             lines.append(f"attention {who}: {', '.join(map(str, w['attention']))} → worker-show/worker-read")
         elif w["last_commit"] and now - w["last_commit"] > stale_min * 60:
             lines.append(f"커밋 없음 {who}: 마지막 커밋 {ago(w['last_commit'])} → worker-read로 화면 끝 확인")
+    live_d = {w["dispatch"] for w in o["workers"]}
+    for did, wt in (s.get("quota_waits") or {}).items():
+        if wt.get("resets") and wt["resets"] <= now and did in live_d and did not in qs:
+            lines.append(f"한도 풀림 {wt.get('kit_id') or wt.get('title') or '?'} ({did}): {routing._hm(wt['resets'])}에 풀렸다 → "
+                         "python3 orchestration/tools/quota_switch.py (이어서 하라고 보낸다)")
     live_ids = {w["kit_id"] for w in o["workers"]}
     orphan = [i for i in s["running"] if i not in live_ids]
     if orphan and not o.get("error"):

@@ -42,7 +42,9 @@
 | 남은 지적 재투입 | `launch.sh --retry <지적.md> --suffix r1 <ID>` (`req/<ID>`에서 분기, 지적만 고친다) |
 | 모델 라우팅 미리보기 | `python3 orchestration/tools/models.py plan` (투입 가능 전체) · `route <ID>` (근거·다음 후보) · `discover` (쓸 수 있는 구독·모델) |
 | 모델 실적·사용량 | `models.py stats` (모델별 결과 점수, 구독별 오늘·7일 사용량) |
-| 사용량 한도에 걸린 구독 | `models.py cooldown <codex\|claude\|antigravity\|grok> --min 120 --reason '한도'` → 그 작업을 다시 `launch.sh`(다른 구독으로 간다) |
+| 사용량 한도로 멈춘 워커 | 정지 점검의 `한도 정지` → `python3 orchestration/tools/quota_switch.py` (진행분을 `wip/<ID>-quota-*`에 보존 → 워커 정리 → 같은 워크트리에서 다른 구독으로 이어받기. 곧 풀리거나 검토 독립성을 못 지키면 대기). 미리 보기 `--dry-run` |
+| 자는 동안의 한도 정지·풀림 알림 | 운영을 시작할 때 한 번 `python3 orchestration/tools/quota_watch.py install` (Orca 예약 실행이 10분마다 사전 확인만 돌려, 할 일이 있으면 이 Run에 '한도 점검' 메일을 보낸다. 에이전트는 띄우지 않는다). 끝낼 때 `remove` |
+| 한도에 걸릴 구독을 미리 빼기 | `models.py cooldown <codex\|claude\|antigravity\|grok> --min 120 --reason '한도'` (라우팅은 Orca 잔여 한도를 보고 소진 구독을 스스로 뺀다: `models.py quota`) |
 | 이번만 모델 바꾸기 | `launch.sh --agent codex --model <id> --effort high <ID>` (작업에 고정: 항목에 `route: <카탈로그 키>`) |
 | status 갱신 | `python3 orchestration/tools/task_status.py <ID> review\|merged` |
 | DAG 검증 | `python3 orchestration/tools/validate_dag.py` — 오류 0이어야 커밋 |
@@ -65,7 +67,7 @@
   - 정리·해제 전에 `worker-show`로 그 워커에 남은 후속 디스패치가 없는지 본다. 상시 워커는 지시마다 디스패치가 새로 생기므로 보내기 전에 `worker-list`로 최신 디스패치를 확인한다.
 - **모델은 라우팅에 맡긴다.** `launch.sh`가 작업마다 난이도·태그를 분류해 구독·모델·effort를 고른다(`orchestration/models.yaml`). 투입 출력의 `라우팅:` 줄을 본다.
   - 분류가 틀린 작업만 tasks.yaml에 `difficulty: easy|normal|hard|critical`(또는 `tags`)을 적는다. 모델을 손으로 고정(`route:`·`agent/model`)하는 것은 이유가 있을 때만(예: 특정 모델만 아는 도구).
-  - 워커가 사용량 한도(usage limit, rate limit, quota)로 멈추거나 실패하면 그 구독을 `models.py cooldown`으로 빼고 다시 낸다. 실패한 작업은 다음 투입 때 난이도를 올리고 실패한 모델을 피한다.
+  - 워커가 사용량 한도(usage limit, rate limit, quota)로 멈추면 `quota_switch.py`로 이어받게 한다(정지 점검이 `한도 정지`로 알린다). 손으로 하지 않는다: 진행분 보존·정리·이어받기 투입을 도구가 한 번에 하고, 멈춘 투입은 실적에 넣지 않는다. 멈춘 워커의 escalation(stopReason)은 전환 기록(`state/quota_switch.tsv`)에 있으면 처리된 것이다. 한도가 아닌 실패는 다음 투입 때 난이도를 올리고 실패한 모델을 피한다.
   - Orca에서 꺼진 에이전트로 라우팅되면 `launch.sh`가 그 구독을 24시간 쿨다운하고 다른 구독으로 다시 고른다. 켠 뒤에는 `models.py cooldown --clear <에이전트>`.
   - Antigravity(`agy`)는 작업 폴더를 신뢰해야 시작한다(새 워크트리마다 확인 창). 확인 창에서 멈춘 워커는 마스터에 올린다.
   - 검토 판정은 실적에 반영한다: `models.py feedback <ID> pass|minor|major|fail`(`procedures/review.md` 2). 웨이브가 끝나면 `models.py stats`를 보고 맞지 않는 점수는 `models.yaml models:`에서 고친다.
@@ -85,6 +87,7 @@
 - **깨어날 때마다, 그리고 턴을 끝내기 전에** `python3 orchestration/tools/status.py --stall`을 본다.
   - 대기해도 되는 경우: 진행 중 워커가 하나 이상 있거나, 남은 것이 사용자 답뿐(마스터에 질문이 올라가 있음)일 때.
   - **'할당 누락'이 나오면 대기하지 말고 투입한다.** 일부러 미룬 작업이면 `hold: <사유>`를 적는다.
+  - **'한도 정지'·'한도 풀림'이 나오면 `quota_switch.py`를 돌린다**(설정 `routing.quota.on_exhausted`, 기본 switch). 대기 판정(곧 풀림·다른 구독도 한도·검토 독립성)이면 풀리는 시각을 기록해 두고, 그 뒤에 이 도구가 돌 때 워커에게 '이어서 하라'를 보낸다. 풀리는 시각이 지나서 깨어나면 `--stall`이 '한도 풀림'으로 알린다. `quota_watch.py install`을 해 두면 자는 동안에도 '한도 점검' 메일이 와서 깨어난다.
   - '커밋 없음'·'attention'·'running 고아'는 `worker-show`·`worker-read`로 화면 끝을 보고 분류한다. load가 0에 가까운데 '진행 중'이면 대기 루프나 프롬프트에 멈춘 것이다.
 - **분류해 한 줄로 보고한다:** `send --to run:{{MASTER_RUN}} --type status --subject '정지 점검' --body '실행 중 N, 최고령 커밋 <시각>. <ID>: 세션 종료|대기(<무엇>)|할당 누락 → <조치>'`. **세션 종료**(문맥 소진·비정상 종료 → 남은 목록으로 새 작업), **대기**(승인 프롬프트·ask 답·사용자 결정 → 풀 수 있으면 풀고 아니면 올림), **할당 누락**(→ 바로 낸다). 이상이 없으면 보고하지 않는다.
 

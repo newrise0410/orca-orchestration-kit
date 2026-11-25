@@ -198,3 +198,22 @@ v0.4.1(10장)에서 snap 설치본은 작업 폴더 신뢰 확인 창에 막혔�
 - 시험한 한도 묶음은 Antigravity의 "Claude and GPT models"(그때 0%)다. Gemini Neon·Carbon은 같은 실행 파일이고 모델 ID만 다르지만 직접 띄우지는 않았다(Gemini 묶음 세션 90%라 아꼈다).
 - 결론: 공식 설치본 Antigravity는 Orca 워커로 쓸 수 있고, 라우팅 후보에 들어간다. snap 설치본은 계속 자동으로 뺀다.
 
+## 17. v0.8.0: 한도 전환 (2026-11-25)
+
+| 항목 | 결과 |
+|---|---|
+| `tests/smoke.sh` | 129/129(이전 107 + 22). 가짜 Orca(워커 목록·한도·stop/release/start/send 기록)와 실제 git 워크트리로 시험 |
+| 예약 점검(가짜 Orca) | precheck: 할 일 없으면 1·메일 없음, 한도 정지면 `send --to run:<work_run> --type status`(한도 점검) 뒤에도 1, 같은 내용 재알림 안 함. install: `automations create --trigger */10 … --precheck 'cd <저장소> && ORCA_CLI_COMMAND=<절대 경로> <python3> …/quota_watch.py precheck'`·상태 기록, 이미 있으면 다시 만들지 않음, remove |
+| 예약 점검(실제 Orca) | 1분 간격 시험 예약 실행을 만들어 확인하고 지웠다: 사전 확인이 매분 돌았고 세 번 모두 `skipped_precheck`("Precheck exited with code 1") — 에이전트가 뜨지 않았다. 사전 확인 환경: 작업 폴더에서 실행, 셸 명령(`cd /tmp && X=compound …`가 됐다), `ORCA_CLI_COMMAND` 없음, PATH의 `orca`는 `/usr/bin/orca` |
+| 대기 뒤 재개 | 대기 판정 때 `quota_wait.json`에 풀리는 시각 기록 → 정지 점검이 '대기 중(HH:MM에 풀리면 재개 메시지)' → 시각이 지나면 '한도 풀림' → `quota_switch.py`가 `send --to dispatch:<id> --type status`('이어서 하라')를 보내고 기록을 지운다(worker-stop 없음). `--due`는 할 일이 있으면 0, 없으면 1 |
+| 감지 | 정지 점검: `한도 정지 X-SW (dispatch): codex 세션 100%(HH:MM 초기화) · codex-sol → quota_switch.py` |
+| 미리 보기 | `--dry-run`은 계획만 출력, Orca 변경 호출 없음 |
+| 대기 | 30분 안에 풀림 · `on_exhausted: wait` · 검토 워커인데 남은 후보가 구현한 구독(검토 독립성) — 셋 다 worker-stop을 부르지 않는다 |
+| 전환 | worker-stop → 보존 → worker-release → 같은 워크트리(`--worktree path:`)로 worker-start, 에이전트는 codex가 아님 |
+| 보존 | `wip/X-SW-quota-*`에 커밋하지 않은 파일까지 들어 있고, 작업 브랜치 HEAD·작업 트리·미커밋 파일은 그대로 |
+| 기록 | dispatch.tsv `X-SW handoff-h1`, quota_switch.tsv, `specs/X-SW.handoff-h1.md`(이어받기 절·보존 브랜치), tasks.yaml status running 유지 |
+| 실적 | 멈춘 dispatch는 outcomes에서 빠지고, 머지되면 handoff 투입이 1.0 |
+| 정리 | `cleanup_worker.sh --dry-run`이 보존 브랜치 삭제를 포함 |
+
+- 실제 Orca에서 한도로 멈춘 워커를 전환해 보지는 않았다(그 순간을 만들 수 없었다). Orca 명령(worker-stop·worker-release·worker-start `--worktree path:`)은 v0.4.1·v0.7.0 실기동에서 쓴 것과 같다.
+

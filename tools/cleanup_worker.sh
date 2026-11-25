@@ -30,6 +30,8 @@ ws=json.load(sys.stdin).get('result',{}).get('workers',[])
 done={'succeeded','failed','abandoned','stopped','cancelled','canceled'}
 print(' '.join(w['dispatchId'] for w in ws if str(w.get('workspace','')).endswith('/$n') and w.get('state') not in done))")
 [ -z "$act" ] || { echo "보류 $n: 끝나지 않은 디스패치 $act"; exit 1; }
+# 한도 전환 보존 브랜치(wip/<ID>-quota-*): 작업이 상위에 머지됐으니 더는 필요 없다
+id="${rb#req/}"; wips=$(git for-each-ref --format='%(refname:short)' "refs/heads/wip/${id}-quota-*")
 dsps=$(printf '%s' "$wl" | python3 -c "
 import json,sys
 for w in json.load(sys.stdin).get('result',{}).get('workers',[]):
@@ -39,6 +41,7 @@ if [ $DRY = 1 ]; then
   for dsp in $dsps; do echo "[dry-run] $ORCA orchestration worker-release --dispatch $dsp"; done
   echo "[dry-run] $ORCA worktree rm --worktree path:$d --delete-branch"
   [ -n "$HOOK" ] && echo "[dry-run] $HOOK $n"
+  for b in $wips; do echo "[dry-run] git branch -D $b"; done
   exit 0
 fi
 for dsp in $dsps; do
@@ -46,4 +49,5 @@ for dsp in $dsps; do
 done
 "$ORCA" worktree rm --worktree "path:$d" --delete-branch >/dev/null
 [ -n "$HOOK" ] && [ -x "$HOOK" ] && "$HOOK" "$n"
-echo "정리 $n: 터미널 해제, 워크트리·로컬 브랜치 제거${HOOK:+, 정리 훅 실행}"
+for b in $wips; do git branch -q -D "$b"; done
+echo "정리 $n: 터미널 해제, 워크트리·로컬 브랜치 제거${wips:+, 한도 전환 보존 브랜치 제거}${HOOK:+, 정리 훅 실행}"
