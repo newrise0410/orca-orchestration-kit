@@ -100,6 +100,18 @@ def yaml_inline(d):
 AGENT_BINS = {"claude": "claude", "codex": "codex", "antigravity": "agy", "grok": "grok"}
 
 
+def test_slots(ans):
+    """(slots.test 값, kit.yaml 주석) — 답변 test_slots가 없으면 설치 기계의 코어·메모리로 제안한다."""
+    sys.path.insert(0, str(KIT_ROOT / "tools"))
+    import kitlib
+    if ans.get("test_slots"):
+        return max(1, int(ans["test_slots"])), "설치 때 정한 값"
+    c, m = kitlib.machine_spec()
+    n = kitlib.suggest_slots(c, m)
+    return n, (f"설치 기계(코어 {c or '?'}·메모리 {round(m) if m else '?'} GiB) 기준 제안(코어 4개·메모리 8 GiB당 1). "
+               "시험 하나가 쓰는 메모리를 재 보고 조정한다. 줄이 길면 status.py가 '슬롯 줄'로 알린다")
+
+
 def build_vars(ans, today):
     mods = ans["modules"]
     stages = review_preset(ans.get("review_preset"))
@@ -123,6 +135,7 @@ def build_vars(ans, today):
         "MAIN_BRANCH": ans["main_branch"], "COMMIT_EMAIL": ans.get("commit_email") or f"dev@{ans['slug']}.invalid",
         "TEAM_NAME": ans.get("team_name") or f"{ans['name']} team",
         "BUILD_CMD": build_cmd, "TEST_CMD": test_cmd,
+        **dict(zip(("TEST_SLOTS", "TEST_SLOTS_NOTE"), test_slots(ans))),
         "TODAY": today.isoformat(), "TODAY_COMPACT": today.strftime("%Y%m%d"),
         "REQ_FOLDER": req_folder,
         "MODULES_YAML": "\n".join(f"  - {yaml_inline(m)}" for m in mods),
@@ -323,7 +336,7 @@ def load_answers(a):
     ans = {}
     if a.answers:
         ans.update(yaml.safe_load(Path(a.answers).read_text(encoding="utf-8")) or {})
-    for k in ("name", "slug", "review_preset", "remote", "profile", "build_cmd", "test_cmd", "image",
+    for k in ("name", "slug", "review_preset", "remote", "profile", "build_cmd", "test_cmd", "test_slots", "image",
               "restricted", "summary", "commit_email", "team_name", "main_branch", "git_remote", "protected", "agents"):
         val = getattr(a, k, None)
         if val is not None:
@@ -707,6 +720,7 @@ def main(argv=None):
     pi.add_argument("--remote", help="원격 실행 머신 user@host (없으면 빈 값)")
     pi.add_argument("--profile", help="실행 격리 프로필 (예: ros2)")
     pi.add_argument("--build-cmd", dest="build_cmd"), pi.add_argument("--test-cmd", dest="test_cmd")
+    pi.add_argument("--test-slots", dest="test_slots", type=int, help="전체 시험 동시 수(kit.yaml slots.test). 기본: 이 기계 코어·메모리로 제안")
     pi.add_argument("--image"), pi.add_argument("--restricted", help="배포 제한 파일 패턴 (쉼표). 기본 '*.pdf,.orca/'")
     pi.add_argument("--summary"), pi.add_argument("--commit-email", dest="commit_email")
     pi.add_argument("--team-name", dest="team_name"), pi.add_argument("--main-branch", dest="main_branch")

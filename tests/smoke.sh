@@ -143,6 +143,18 @@ printf 'c@notexample.com\n' > docs/06_evidence/F-01/bad.md
 check "이메일 허용 도메인: notexample.com은 걸린다(끝 글자만 맞는 도메인)" bash -c "! python3 $T/evidence_lint.py docs/06_evidence/F-01/bad.md"
 rm -f docs/06_evidence/F-01/ok.md docs/06_evidence/F-01/bad.md
 check "slot.sh 실행" bash -c "$T/slot.sh test -- true"
+check "slot.sh 종료코드 그대로" bash -c "$T/slot.sh test -- sh -c 'exit 7'; test \$? -eq 7"
+# 슬롯 2개: 1번은 오래, 2번은 잠깐 잡혀 있으면 기다리는 쪽은 2번이 비자마자 잡는다(예전: 1번 잠금만 기다렸다)
+KIT_SLOT_POLL=1 $T/slot.sh -n 2 test -- sleep 8 2>/dev/null & sa=$!
+KIT_SLOT_POLL=1 $T/slot.sh -n 2 test -- sleep 1 2>/dev/null & sb=$!
+sleep 0.4; t0=$(date +%s)
+KIT_SLOT_POLL=1 $T/slot.sh -n 2 test -- true 2>/dev/null; dt=$(( $(date +%s) - t0 ))
+check "slot.sh: 여러 슬롯 중 먼저 빈 것을 잡는다(${dt}초 < 6초)" test "$dt" -lt 6
+wait $sa $sb
+check "kitlib.suggest_slots: 코어 4·메모리 8 GiB당 1, 1~8" python3 -c "
+import sys; sys.path.insert(0,'$T'); import kitlib as k
+assert (k.suggest_slots(16,64),k.suggest_slots(4,8),k.suggest_slots(2,4),k.suggest_slots(16,16),k.suggest_slots(128,1024))==(4,1,1,2,8)"
+check "설치: kit.yaml slots.test에 기계 기준 제안값과 근거" grep -Eq '^  test: [1-8] +# 설치 기계\(코어 [0-9]+·메모리 [0-9]+ GiB\) 기준 제안' orchestration/kit.yaml
 
 echo "[8] bootstrap · cleanup"
 check "bootstrap --step 필수" bash -c "! $KIT bootstrap --target $R --dry-run 2>/dev/null"
@@ -587,6 +599,19 @@ check "메일: 한도로 멈춘 워커(quota reached·Resets in)는 필터 중�
 printf 'X-SW\ttask_5a7\tctx_5a7\tx-sw\t2027-01-01 10:00:00\tcodex\tgpt-6.2-sol\thigh\tcodex-sol\t3.0\t\n' >> orchestration/state/dispatch.tsv
 o=$(FAKE_SW=free FAKE_SW_DID=ctx_9z9 FAKE_SW_MAIL=errored FAKE_SW_MAIL_DID=ctx_5a7 $SW python3 $T/status.py --stall 2>&1)
 check "오류 중단: errored인데 한도도 차단 문구도 아니면 확인하라고 알림" has "$o" "오류 중단 X-SW (ctx_5a7)"
+# 슬롯 대기: 다른 워크트리가 전체 시험 슬롯을 잡고 있고 이 워커는 줄에 서 있다 → '커밋 없음'이 아니라 '슬롯 대기'
+KIT_SLOT_POLL=1 KIT_SLOTS_test=1 $T/slot.sh test -- sleep 5 2>/dev/null & sh1=$!
+sleep 0.5
+(cd "$W/wt-x-sw" && KIT_SLOT_POLL=1 KIT_SLOTS_test=1 $T/slot.sh test -- true) 2>/dev/null & sh2=$!
+sleep 1
+o=$(KIT_SLOTS_test=1 FAKE_SW=free FAKE_SW_DID=ctx_9z9 $SW python3 $T/status.py --stall --stale-min 0 2>&1)
+check "정지 점검: 줄에 선 워커는 '슬롯 대기'(커밋 없음 아님)" bash -c 'grep -q "슬롯 대기 X-SW (ctx_9z9): .test. 0분째 · 1번째 · 사용 중 1/1" <<<"$0" && ! grep -q "커밋 없음 X-SW (ctx_9z9)" <<<"$0"' "$o"
+check "정지 점검: 대기 ≥ 슬롯 수면 '슬롯 줄'(잡은 쪽·대기 수)" bash -c 'grep -q "슬롯 줄 .test.: 사용 1/1 (.* 0분) · 대기 1 · 최장 0분" <<<"$0"' "$o"
+o=$(KIT_SLOTS_test=1 FAKE_SW=free FAKE_SW_DID=ctx_9z9 $SW python3 $T/status.py 2>&1)
+check "현황: 워커 줄에 슬롯 대기, 슬롯 요약 줄" bash -c 'grep -q "^- X-SW ctx_9z9 .*· 슬롯 대기 .test. 0분째" <<<"$0" && grep -q "^## 슬롯 .test.: 사용 1/1 · 대기 1" <<<"$0"' "$o"
+wait $sh2; wait $sh1
+o=$(FAKE_SW=free FAKE_SW_DID=ctx_9z9 $SW python3 $T/status.py --stall 2>&1)
+check "슬롯이 비면 표시가 사라진다(대기·잡음 표시 파일 정리)" bash -c '! grep -q "슬롯" <<<"$0" && ! ls "$(git rev-parse --git-common-dir)"/orca-kit/slots/ | grep -q "holder\|wait"' "$o"
 unset FAKE_SW_DID FAKE_SW_TITLE
 $M cooldown claude --min 1440 --reason 'Orca에서 꺼진 에이전트' >/dev/null   # 위에서 푼 쿨다운을 되돌린다(뒤 대시보드 시험이 쓴다)
 cp "$W/models.yaml.pre-sw" orchestration/models.yaml; cp "$W/kit.yaml.pre-sw" orchestration/kit.yaml

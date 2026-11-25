@@ -6,7 +6,7 @@
 적용 절차는 `skills/orca-orchestration-kit/references/upgrade.md`(적용 직전·끝에 매니저에게 알리고, 키트가 바꾼 경로만 커밋).
 아래는 매니저가 **한 번만 다시 익히면 되게** 묶음마다 바뀐 운영을 모은 것이다.
 
-## 다음 묶음: v0.8.4 → v0.10.0 (v0.8.5 · v0.9.0 · v0.9.1 · v0.10.0)
+## 다음 묶음: v0.8.4 → v0.10.1 (v0.8.5 · v0.9.0 · v0.9.1 · v0.10.0 · v0.10.1)
 
 ### 매니저가 새로 할 일
 1. **투입 전에 약속을 닫는다.** L1·L2 작업에 `guarantees`(보장하는 것)와 `out_of_scope`(범위 밖)를 적고 낸다. `validate_dag.py`가 빠진 작업과 '언제나·모든·완전히' 같은 열린 약속을 경고한다. 이미 돌고 있는 작업은 다음 차수(보완·이어받기)를 낼 때 적는다.
@@ -14,11 +14,13 @@
 3. **핵심 약속 점검표를 채운다.** 적용하면 `orchestration/checklist.md`가 새로 생긴다(예시 줄만 있음). 지금까지 검토가 되풀이해 잡은 지적(영역 분리, CLI 차단, 승인 무결성 등)을 '## 항목'에 한 줄씩 넣는다. 다음 구현·보완 명세부터 붙는다.
 4. **pre-push 훅을 다시 깐다**: `orchestration/tools/install_hooks.sh`(훅은 복사본이라 upgrade만으로는 안 바뀐다). 새 훅은 kit.yaml·PyYAML을 못 읽으면 push를 막는다(v0.9.1).
 5. **워크트리를 정리한다(v0.10.0).** 적용 뒤 `python3 orchestration/tools/worktree_sweep.py`로 미리 보고 `--apply`. 그다음부터 launch.sh가 한 시간에 한 번 '정리'(merged·변경 없음·진행 중 없음)만 저절로 지운다. '확인 필요'(커밋하지 않은 변경, 머지 안 된 커밋, 주인 없음)는 이정표마다 목록을 보고 닫는다. 끄려면 kit.yaml `cleanup.auto_sweep: false`.
-6. **기록 커밋은 경로를 지정해 담는다**(`git add -- <파일>`, `git add -A`·`orchestration/` 통째 금지). 키트 적용 중 커밋 섞임(v0.8.5, L-21).
+6. **전체 시험 슬롯 수를 정한다(v0.10.1).** kit.yaml은 프로젝트 소유라 `slots.test: 1`이 그대로 남는다. 정지 점검의 '슬롯 줄'이 이 기계 기준 제안값을 보이면(코어 4개·메모리 8 GiB당 1) 시험 하나의 최대 메모리를 한 번 재 보고 `slots.test`를 올린다. 이제 슬롯이 여럿이어도 먼저 빈 것을 잡는다.
+7. **기록 커밋은 경로를 지정해 담는다**(`git add -- <파일>`, `git add -A`·`orchestration/` 통째 금지). 키트 적용 중 커밋 섞임(v0.8.5, L-21).
 
 ### 저절로 바뀌는 것
 - escalation 메일을 `--full`로 읽어 필터 중단(codex 안전 필터)을 메일 Last output에서 잡는다. 한도 메일(quota reached·Resets in)은 필터·오류 중단으로 잡지 않는다(v0.8.5).
 - 검토 라우팅에서 구현한 모델 자신은 더 뒤로 간다.
+- (v0.10.1) 슬롯 줄에 선 워커는 '진행 중·최근 커밋'이나 '커밋 없음' 대신 '슬롯 대기 N분째'로 보인다.
 - `kit.py upgrade --apply`가 끝에 매니저 커밋용 `git add -- <키트가 바꾼 경로>`를 출력한다.
 - (v0.9.1) launch가 worker-start 실패 때 Orca 고아 Task를 닫고, dispatch.tsv·tasks.yaml 쓰기를 잠근다. cleanup이 워커 목록 전부를 본다. evidence_lint 이메일 도메인 비교가 엄격해져 전에 통과하던 증적이 걸릴 수 있다. quota_watch는 예약 실행이 에이전트를 띄우면 스스로 꺼진다.
 
@@ -31,4 +33,4 @@
 ### 확인
 - `python3 orchestration/tools/validate_dag.py` — 투입 전 작업의 guarantees 경고 목록
 - `python3 orchestration/tools/status.py --stall` — 범위 결정 필요·검토 반복, 필터 중단(메일)
-- 커밋: `[L0] orchestration kit v0.9.0 upgrade`(apply 출력의 경로만)
+- 커밋: `[L0] orchestration kit v0.10.1 upgrade`(apply 출력의 경로만)

@@ -53,7 +53,7 @@
 | int/common → {{MAIN_BRANCH}} 반영·전파 | `orchestration/tools/sync_main.sh [--all] [--push]` (체크아웃을 바꾸지 않는다. 원격은 `--push`일 때만) |
 | 끝난 워크트리 정리 | `python3 orchestration/tools/worktree_sweep.py` (미리 보기) → `--apply`. launch.sh가 한 시간에 한 번 저절로 한다(kit.yaml `cleanup.auto_sweep`). '확인 필요'는 이유를 보고 처리: 커밋하지 않은 변경·머지 안 된 커밋은 워커에 묻거나 보존, 주인 없는 것은 `--orphans`(메인에 다 들어 있을 때만) |
 | 머지 뒤 하나만 정리 | `orchestration/tools/cleanup_worker.sh <워크트리> <브랜치> <상위 브랜치>` (네 조건) |
-| 전체 시험 동시 수 제한 | `orchestration/tools/slot.sh test -- <시험 명령>` |
+| 전체 시험 동시 수 제한 | `orchestration/tools/slot.sh test -- <시험 명령>` (줄은 status.py의 '슬롯 대기'·'슬롯 줄', 수는 kit.yaml `slots.test`) |
 
 ## 3. 운영 규칙
 - **tasks.yaml status:** 투입 running → 증적 나오면 review → 머지 merged. 갱신하면 커밋하고 `sync_main.sh`로 대시보드 기준 브랜치에 반영한다.
