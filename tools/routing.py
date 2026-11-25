@@ -608,7 +608,8 @@ def orca_usage(days=7):
 # 숫자만 state/quota_cache.json에 5분 캐시한다(계정 이메일 등은 읽지도 남기지도 않는다).
 QUOTA_TTL = 300
 QUOTA_DEFAULT = {"enabled": True, "hard_percent": 98, "session_soft": 70, "pace_margin": 10, "use_it_hours": 24,
-                 "on_exhausted": "switch", "wait_minutes": 30}   # 한도 정지 워커: switch(다른 구독으로 이어받기) | wait
+                 "on_exhausted": "switch", "wait_minutes": 30,   # 한도 정지 워커: switch(다른 구독으로 이어받기) | wait
+                 "switch_min_headroom": 30, "switch_need_minutes": 120}  # 넘겨받을 구독: 창마다 이만큼(%) 남고, 지금 속도로 이 시간(분) 안에 다시 차지 않을 것
 
 
 def quota_cfg(pol):
@@ -735,6 +736,34 @@ def quota_effect(m, agents, quota, pol, now=None):
                 adj += 0.5
                 why.append(f"{label} {100 - w['used']:.0f}% 남고 {left_h:.0f}시간 뒤 초기화")
     return None, adj, why
+
+
+def headroom(m, agents, quota, pol, need_minutes, now=None):
+    """한도 전환에서 넘겨받을 모델의 여유 → (넘겨도 되나, 이유).
+    창마다 남은 양이 switch_min_headroom(%) 이상이어야 하고, 5시간 창은 지금까지의 소모 속도(사용률 ÷ 지난 시간)로
+    need_minutes 안에 다시 차지 않아야 한다(곧 다시 찰 구독으로 넘기면 또 멈춘다). 한도를 모르면 넘긴다."""
+    cfg = quota_cfg(pol)
+    mw = model_windows(m, agents, quota)
+    if not mw:
+        return True, ""
+    prov, wins, _ = mw
+    now = now or time.time()
+    for name, w in sorted(wins.items()):
+        if w["resets"] and w["resets"] <= now:
+            continue
+        short = bool(w["minutes"]) and w["minutes"] <= 600
+        label = f"{prov} " + ("세션" if short else ("Fable 주간" if name == "fableWeekly" else "주간"))
+        rem = 100 - w["used"]
+        if rem < float(cfg["switch_min_headroom"]):
+            return False, f"{label} 남은 {rem:.0f}% < {cfg['switch_min_headroom']}%"
+        if short and w["minutes"] and w["resets"] and w["used"] > 0:
+            elapsed = w["minutes"] - (w["resets"] - now) / 60
+            if elapsed >= 30:   # 막 열린 창은 속도를 믿지 않는다
+                fill = rem / (w["used"] / elapsed)
+                left = (w["resets"] - now) / 60
+                if fill < min(need_minutes, left):
+                    return False, f"{label} {w['used']:.0f}%, 지금 속도면 {fill:.0f}분 뒤 다시 찬다(필요 {min(need_minutes, left):.0f}분)"
+    return True, ""
 
 
 def exhausted(m, agents, quota, min_used=100.0, now=None):
@@ -1057,9 +1086,11 @@ def score(key, m, c, pol, ctx):
 
 
 def route(repo, cfg, tid, tasks, mode="new", live_dids=None, refresh=False, catalog=None, pol=None, disc=None,
-          extra_running=None, jev_net=True, quota=None):
+          extra_running=None, jev_net=True, quota=None, need_minutes=None, exclude_agents=None):
     """작업 하나의 결정. 반환: {key, agent, model, effort, difficulty, tags, reasons, why, alts, excluded}.
-    후보가 없으면 key가 None. extra_running: 이번 호출에서 방금 띄운(아직 집계에 없는) 에이전트별 수."""
+    후보가 없으면 key가 None. extra_running: 이번 호출에서 방금 띄운(아직 집계에 없는) 에이전트별 수.
+    need_minutes: 한도 전환(quota_switch)일 때 넘겨받을 구독에 필요한 여유 시간 — 곧 다시 찰 후보를 뺀다(headroom).
+    exclude_agents: 아예 뺄 구독(검토 이어받기의 검토 독립성: 구현한 구독)."""
     if catalog is None or pol is None:
         catalog, pol = load(repo)
     disc = disc if disc is not None else discover(repo, catalog, refresh=refresh)
@@ -1100,7 +1131,13 @@ def route(repo, cfg, tid, tasks, mode="new", live_dids=None, refresh=False, cata
         if minq and float(m.get("quality", 3)) < float(minq):
             excluded[key] = f"min_quality.{t.get('layer')}={minq}"
             continue
+        if ag in (exclude_agents or ()):
+            excluded[key] = f"검토 독립성: {ag}가 구현했다"
+            continue
         qx, qadj, qwhy = quota_effect(m, catalog["agents"], quota, pol)
+        if not qx and need_minutes is not None:
+            ok, hw = headroom(m, catalog["agents"], quota, pol, need_minutes)
+            qx = None if ok else f"넘겨받기엔 빠듯: {hw}"
         if qx:
             excluded[key] = qx
             quota_out.add(key)

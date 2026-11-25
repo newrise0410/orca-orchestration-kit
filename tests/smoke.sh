@@ -307,6 +307,7 @@ o=$($M update --check grok 2>&1)
 check "update --check: 업데이트하지 않음" bash -c 'grep -q "grok: 확인 1.0.1" <<<"$0"' "$o"
 o=$(PATH="$W/bin2:$PATH" $M update antigravity 2>&1)
 check "update: snap 설치본은 건너뜀" has "$o" "antigravity: 건너뜀"
+$M discover >/dev/null 2>&1   # 위 시험이 snap PATH로 모델 캐시를 다시 썼다 → 원래 PATH로 되돌린다
 # 잔여 한도: Orca rateLimits(orca account list --json). 소진은 초기화까지 제외, 빠듯하면 벌점, 묶음·모델별 창, 숫자만 캐시
 cat > "$W/fake-orca-quota.py" <<'PY'
 import json, os, sys, time
@@ -346,14 +347,14 @@ open(st + "/calls.log", "a").write(a + "\n")
 now, h = time.time() * 1000, 3600 * 1000
 reset = now + (10 * 60 * 1000 if os.environ.get("FAKE_SW") == "soon" else 3 * h)
 used = 20 if os.environ.get("FAKE_SW") == "free" else 100
+tight = os.environ.get("FAKE_SW") == "tight"   # 다른 구독: 세션 60%가 100분 만에 찼다(0.6%/분) → 67분 뒤 다시 찬다
 def out(o): print(json.dumps(o)); sys.exit(0)
 if a.startswith("account list"):
     ok = lambda u, m, r: {"usedPercent": u, "windowMinutes": m, "resetsAt": r}
     out({"ok": True, "result": {"rateLimits": {
         "codex": {"provider": "codex", "status": "ok", "session": ok(used, 300, reset), "weekly": ok(40, 10080, now + 100 * h)},
-        "claude": {"provider": "claude", "status": "ok", "weekly": ok(10, 10080, now + 100 * h)},
-        "grok": {"provider": "grok", "status": "ok", "weekly": ok(10, 10080, now + 100 * h)},
-        "antigravity": {"provider": "antigravity", "status": "ok", "weekly": ok(10, 10080, now + 100 * h)}}}})
+        **{p: dict({"provider": p, "status": "ok", "weekly": ok(10, 10080, now + 100 * h)},
+                   **({"session": ok(60, 300, now + 200 * 60 * 1000)} if tight else {})) for p in ("claude", "grok", "antigravity")}}}})
 if "worker-list" in a:
     out({"ok": True, "result": {"workers": [{"dispatchId": os.environ.get("FAKE_SW_DID", "ctx_5a1"), "taskId": "task_5a1", "state": "running",
                                              "liveness": "alive", "workspace": os.environ["FAKE_SW_WT"]}]}})
@@ -427,6 +428,19 @@ import yaml; p='orchestration/models.yaml'; d=yaml.safe_load(open(p)); d['routin
 o=$($SW python3 $T/quota_switch.py 2>&1)
 check "설정 on_exhausted: wait면 대기" has "$o" "on_exhausted: wait"
 cp "$W/models.yaml.pre-sw" orchestration/models.yaml
+check "넘겨받을 여유: 남은 % · 소모 속도 · 막 열린 창은 속도를 믿지 않음" python3 -c "
+import sys,time; sys.path.insert(0,'$T'); import routing
+ag={'codex':{}}; pol={'routing':{}}; now=time.time(); m={'agent':'codex'}
+q=lambda used,left_min: {'codex':{'status':'ok','windows':{'session':{'used':used,'minutes':300,'resets':now+left_min*60}},'groups':{}}}
+ok,why=routing.headroom(m,ag,q(80,100),pol,120); assert not ok and '남은 20%' in why, why
+ok,why=routing.headroom(m,ag,q(60,200),pol,120); assert not ok and '다시 찬다' in why, why
+ok,why=routing.headroom(m,ag,q(20,200),pol,120); assert ok, why
+ok,why=routing.headroom(m,ag,q(50,290),pol,120); assert ok, why
+ok,why=routing.headroom(m,ag,q(60,200),pol,30); assert ok, why"
+rm -f orchestration/state/quota_cache.json
+o=$(FAKE_SW=tight $SW python3 $T/quota_switch.py 2>&1)
+check "넘겨받을 구독도 곧 다시 차면 전환하지 않고 대기" bash -c 'grep -q "^\[대기\] X-SW .*넘겨받을 구독도 곧 다시 찬다: .*다시 찬다" <<<"$0" && ! grep -q "worker-stop" "$1/calls.log"' "$o" "$W/sw"
+rm -f orchestration/state/quota_cache.json
 o=$($SW python3 $T/quota_switch.py 2>&1)
 check "전환: 멈춤 → 보존 → 해제 → 같은 워크트리에서 다른 구독으로 이어받기" bash -c 'l=$(cat "$1/calls.log"); grep -q "worker-stop --dispatch ctx_5a1" <<<"$l" && grep -q "worker-release --dispatch ctx_5a1" <<<"$l" && grep -q -- "worker-start .*--worktree path:$2" <<<"$l" && ! grep -q -- "worker-start .*--agent codex" <<<"$l" && grep -q "보존: wip/X-SW-quota-" <<<"$0"' "$o" "$W/sw" "$W/wt-x-sw"
 wip=$(git for-each-ref --format='%(refname:short)' 'refs/heads/wip/X-SW-quota-*' | head -1)
@@ -448,6 +462,13 @@ sed -i "s/^  agents: .*/  agents: [codex, $impl]/" orchestration/models.yaml
 : > "$W/sw/calls.log"
 o=$(FAKE_SW_DID=ctx_5a2 FAKE_SW_TITLE=X-SW-RV $SW python3 $T/quota_switch.py 2>&1)
 check "검토 워커: 남은 후보가 구현한 구독이면 대기(검토 독립성)" bash -c 'grep -q "^\[대기\] X-SW .*검토 독립성" <<<"$0" && ! grep -q "worker-stop" "$1/calls.log"' "$o" "$W/sw"
+# 검토 워커 이어받기: kit.yaml review.agent가 한도 찬 구독(codex)으로 고정돼 있어도 고른 구독으로 넘긴다
+cp "$W/models.yaml.pre-sw" orchestration/models.yaml
+python3 -c "
+import yaml; p='orchestration/kit.yaml'; d=yaml.safe_load(open(p)); d['review']={'agent':'codex','model':'gpt-6.2-sol','effort':''}; yaml.safe_dump(d,open(p,'w'),allow_unicode=True,sort_keys=False)"
+: > "$W/sw/calls.log"; rm -f orchestration/state/quota_cache.json
+o=$(FAKE_SW_DID=ctx_5a2 FAKE_SW_TITLE=X-SW-RV $SW python3 $T/quota_switch.py 2>&1)
+check "검토 이어받기: review.agent 고정(codex)보다 고른 구독 · 구현 구독도 피함" bash -c 'grep -q "^\[전환\] X-SW" <<<"$0" && l=$(grep "worker-start" "$1/calls.log"); test -n "$l" && ! grep -q -- "--agent codex" <<<"$l" && ! grep -q -- "--agent $2 " <<<"$l" && tail -1 orchestration/state/dispatch.tsv | grep -q "^X-SW-RV-h2	"' "$o" "$W/sw" "$impl"
 cp "$W/models.yaml.pre-sw" orchestration/models.yaml; cp "$W/kit.yaml.pre-sw" orchestration/kit.yaml
 rm -f orchestration/state/quota_cache.json; unset FAKE_SW_DIR FAKE_SW_WT
 git branch req/X-CL int/api && git worktree add -q "$W/x-cl" req/X-CL && git branch wip/X-CL-quota-20260101-000000 req/X-CL
