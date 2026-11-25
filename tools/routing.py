@@ -423,7 +423,7 @@ def read_dispatch(repo, ids):
         if len(c) < 5:
             continue
         kid, mode = kit_id_of(c[0], ids)
-        r = {"title": c[0], "kit_id": kid, "mode": mode, "did": c[2], "ts": c[4],
+        r = {"title": c[0], "kit_id": kid, "mode": mode, "did": c[2], "name": c[3], "ts": c[4],
              "agent": c[5] if len(c) > 5 else "", "model": c[6] if len(c) > 6 else "",
              "effort": c[7] if len(c) > 7 else "", "key": c[8] if len(c) > 8 else "",
              "difficulty": c[9] if len(c) > 9 else "", "jev": c[10] if len(c) > 10 else ""}

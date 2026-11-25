@@ -18,6 +18,8 @@
   running 고아 tasks.yaml은 running인데 진행 중 워커가 없음 → 끝났으면 review/merged, 멈췄으면 재투입
   할당 누락    진행 중 워커 0이고 투입 가능 작업이 있음 → launch.sh (일부러 미룬 작업은 tasks.yaml에 hold: <사유>)
   대기할 것 없음 진행 중 0 · 투입 가능 0 · 미답 질문 0 → 다음 작업을 DAG에 넣거나 종료
+  워크트리 정리 끝난 워커 워크트리(작업 merged·변경 없음·진행 중 디스패치 없음)가 남아 있다 → worktree_sweep.py --apply
+              (launch.sh가 한 시간에 한 번 저절로 한다. '확인 필요'는 커밋하지 않은 변경·머지 안 된 커밋·주인 없음)
   범위 결정 필요 같은 작업에서 같은 차단 계열(models.py feedback --category)이 review.scope_escalate_after(기본 2)회 연속
               → 한 번 더 고치기 대신 보장/범위 밖을 바꾸는 선택지(축소·기본 차단·범위 밖)를 마스터에 올린다(교훈 L-22)
   검토 반복   계열이 없거나 달라도 차단이 그보다 한 번 더 연속 → 같은 원인인지 보고 범위 선택지를 검토
@@ -140,7 +142,7 @@ def collect(repo, cfg, a):
             state = str(w.get("state"))
             t_ = titles.get(w.get("taskId")) or ""
             o["by_dispatch"][w.get("dispatchId")] = {"dispatch": w.get("dispatchId"), "title": t_, "kit_id": kit_id_of(t_, idset),
-                                                     "state": state, "liveness": w.get("liveness"),
+                                                     "state": state, "liveness": w.get("liveness"), "terminalState": w.get("terminalState"),
                                                      "workspace": kitlib.workspace_path(w.get("workspace"))}
             if state in kitlib.SETTLED_WORKER_STATES:
                 o["settled"][state] = o["settled"].get(state, 0) + 1
@@ -165,6 +167,16 @@ def collect(repo, cfg, a):
             if r.get("agent"):
                 by[r["agent"]] = by.get(r["agent"], 0) + 1
         out["quota_stalls"] = quota_stalls(repo, catalog, pol, o["workers"])
+        try:
+            import worktree_sweep
+            wts, werr = worktree_sweep.orca_worktrees(repo)
+            if not werr:
+                allw = [dict(w, dispatchId=w["dispatch"]) for w in (o.get("by_dispatch") or {}).values()]
+                res = worktree_sweep.classify(repo, cfg, tasks, allw, wts)
+                out["sweep"] = {"safe": [i["name"] for v, _, i in res if v == worktree_sweep.SAFE],
+                                "check": [i["name"] for v, _, i in res if v == worktree_sweep.CHECK]}
+        except Exception:  # noqa: BLE001 — 현황은 정리 판정이 깨져도 나와야 한다
+            pass
         out["turn_stops"], out["error_stops"] = ([], []) if getattr(a, "no_read", False) else \
             turn_stops(repo, o, rows, {q["dispatch"] for q in out["quota_stalls"]})
         try:
@@ -413,6 +425,12 @@ def stall_lines(s, stale_min):
         elif w["last_commit"] and now - max(w["last_commit"], w.get("started") or 0) > stale_min * 60:
             lines.append(f"커밋 없음 {who}: 마지막 커밋 {ago(w['last_commit'])}"
                          + (f" · 투입 {ago(w['started'])}" if w.get("started") else "") + " → worker-read로 화면 끝 확인")
+    sw = s.get("sweep") or {}
+    if sw.get("safe"):
+        lines.append(f"워크트리 정리 {len(sw['safe'])}개 ({', '.join(sw['safe'][:5])}{' …' if len(sw['safe']) > 5 else ''}) → "
+                     "python3 orchestration/tools/worktree_sweep.py --apply")
+    if sw.get("check"):
+        lines.append(f"워크트리 확인 필요 {len(sw['check'])}개 → python3 orchestration/tools/worktree_sweep.py (이유별 목록)")
     live_d = {w["dispatch"] for w in o["workers"]}
     for did, wt in (s.get("quota_waits") or {}).items():
         if wt.get("resets") and wt["resets"] <= now and did in live_d and did not in qs:

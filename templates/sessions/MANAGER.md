@@ -51,7 +51,8 @@
 | 일부러 미루는 작업 | tasks.yaml 항목에 `hold: <사유>` (투입 가능·할당 누락 판정에서 빠진다) |
 | merged 작업 보관 | `python3 orchestration/tools/archive_tasks.py` (웨이브가 끝날 때. tasks.yaml을 작게 유지) |
 | int/common → {{MAIN_BRANCH}} 반영·전파 | `orchestration/tools/sync_main.sh [--all] [--push]` (체크아웃을 바꾸지 않는다. 원격은 `--push`일 때만) |
-| 머지 뒤 정리 | `orchestration/tools/cleanup_worker.sh <워크트리> <브랜치> <상위 브랜치>` (네 조건) |
+| 끝난 워크트리 정리 | `python3 orchestration/tools/worktree_sweep.py` (미리 보기) → `--apply`. launch.sh가 한 시간에 한 번 저절로 한다(kit.yaml `cleanup.auto_sweep`). '확인 필요'는 이유를 보고 처리: 커밋하지 않은 변경·머지 안 된 커밋은 워커에 묻거나 보존, 주인 없는 것은 `--orphans`(메인에 다 들어 있을 때만) |
+| 머지 뒤 하나만 정리 | `orchestration/tools/cleanup_worker.sh <워크트리> <브랜치> <상위 브랜치>` (네 조건) |
 | 전체 시험 동시 수 제한 | `orchestration/tools/slot.sh test -- <시험 명령>` |
 
 ## 3. 운영 규칙
@@ -81,7 +82,7 @@
 - **{{MAIN_BRANCH}} 머지 관문 = 범위 확인 → build → 전체 시험 → 체계 스모크(기본 설정).** 관문 전에 `procedures/merge-gate.md`를 읽는다. 관문을 통과하지 않은 후보는 올리지 않는다.
 - **원격 push:** {{PUSH_POLICY}}
 - **동시 실행:** 세션 수가 아니라 자원으로 제한한다. 2개씩 늘리며 5분씩 지표를 보고, 안전선을 넘으면 그때 수 − 2를 실측 한도로 기록한다. 전체 시험은 `slot.sh`, 무거운 실행은 HEAVY 슬롯.
-- **종료 정리:** 머지된 워커는 바로 `cleanup_worker.sh`로 정리한다(네 조건을 모두 만족할 때만 지운다).
+- **종료 정리:** 끝난 워커 워크트리는 `worktree_sweep.py`가 정리한다(launch.sh가 한 시간에 한 번, 잃을 것이 없는 것만). 정지 점검의 '워크트리 확인 필요'는 이정표마다 목록을 보고 닫는다. 하나만 바로 지울 때는 `cleanup_worker.sh`.
 - **마스터 보고:** 이정표마다 짧게(W0 완료, G-0, 웨이브 시작·종료, 모듈 통합, 실패·차단). 사소한 진행은 보고하지 않는다. 메시지 본문은 작은따옴표로 감싼다(백틱이 셸에서 실행된 사례).
 - **커밋:** 메시지는 `[작업ID]`, `[L0]`, `[G]`(머지)로 시작한다. rebase·force push 금지. 끝에 프로젝트가 정한 공동 작성자 줄을 붙인다.
 - **기록 커밋은 경로를 지정해 담는다:** `git add -- <바꾼 파일>`. `git add -A`·`git add .`·`git add orchestration/`·`git commit -a`는 쓰지 않는다(다른 세션이 같은 작업 트리를 바꾸는 중이면 그 변경이 섞인다). 마스터가 '키트 적용 시작'을 알리면 '끝' 알림까지 `orchestration/tools`·`templates`·`sessions`는 담지 않고, 끝나면 마스터가 넘긴 `git add -- …` 그대로 `[L0] orchestration kit v<버전> upgrade`로 따로 커밋한다.
