@@ -29,6 +29,7 @@ import os
 import re
 import shlex
 import subprocess
+import time
 import sys
 from pathlib import Path
 
@@ -268,6 +269,16 @@ def main(argv=None):
             else:
                 print(f"  라우팅: {routing.describe(dec)} → orca.agent 기본값으로 띄운다", file=sys.stderr)
         agent = agent or kitlib.cfg_get(cfg, "orca.agent", "claude") or "claude"
+        # 검토 2회차부터는 지난 지적의 해소와 지정된 확인만 보는 좁은 검토라 effort를 한 단계 낮춘다(명시한 --effort는 그대로)
+        step = int(kitlib.cfg_get(cfg, "review.recheck_effort_step", 1) or 0)
+        if mode == "review" and effort in routing.EFFORTS and step > 0 and not (a.effort or os.environ.get("KIT_REVIEW_EFFORT")):
+            prior = sum(1 for r in routing.read_dispatch(repo, set(tasks)) if r["kit_id"] == tid and r["mode"] == "review")
+            if prior:
+                allowed = [e for e in ((catalog["models"].get(rkey) or {}).get("efforts") or routing.EFFORTS) if e in routing.EFFORTS]
+                lower = [e for e in allowed if routing.EFFORTS.index(e) <= routing.EFFORTS.index(effort) - step]
+                if lower:
+                    print(f"  검토 {prior + 1}회차: 좁은 확인이라 effort {effort} → {lower[-1]} (kit.yaml review.recheck_effort_step)")
+                    effort = lower[-1]
         if effort and not model:
             print("  참고: model 없이 effort는 쓸 수 없어 effort를 뺀다", file=sys.stderr)
             effort = None
@@ -322,6 +333,10 @@ def main(argv=None):
                                    agent, str(model or ""), str(effort or ""), rkey, rdiff, rjev]) + "\n")
             if mode == "new" and tid in active:
                 tpath.write_text(task_status.set_status(tpath.read_text(encoding="utf-8"), tid, "running"), encoding="utf-8")
+            acct = (routing.read_accounts(repo).get(agent) or {}).get("active")   # 이 워커가 뜬 계정(Orca에서 고른 계정)
+            if acct:
+                with open(repo / "orchestration/state/dispatch_accounts.tsv", "a", encoding="utf-8") as f:
+                    f.write(f"{did}\t{agent}\t{acct}\t{int(time.time())}\n")
         launched[agent] = launched.get(agent, 0) + 1
         print(f"  {title} {otid} {did}")
     return rc

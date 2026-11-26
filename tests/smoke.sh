@@ -92,6 +92,13 @@ o=$(KIT_RUN=run_x $T/launch.sh --dry-run I-API 2>&1); check "int/api 없으면 L
 git branch int/api main; git branch int/web main
 o=$(KIT_RUN=run_x $T/launch.sh --dry-run I-API 2>&1); check "L1 투입은 --keep-open" has "$o" "--keep-open"
 o=$(KIT_RUN=run_x $T/launch.sh --dry-run --review F-01 2>&1); check "--review: 기준 main, req/F-01-RV" bash -c "grep -q -- '--base-branch main' <<<\"\$0\" && test -f orchestration/specs/F-01.review.md && grep -q 'req/F-01-RV' orchestration/specs/F-01.review.md" "$o"
+cp orchestration/kit.yaml "$W/kit.yaml.pre-rv"; cp orchestration/state/dispatch.tsv "$W/dispatch.pre-rv"
+sed -i '/^review:/,/^[a-z]/{s/^  agent: ""/  agent: "claude"/;s/^  model: ""/  model: "claude-opus-5-5"/;s/^  effort: ""/  effort: "high"/}' orchestration/kit.yaml
+o=$(KIT_RUN=run_x $T/launch.sh --dry-run --review F-01 2>&1); check "검토 1회차: kit.yaml review.effort 그대로(high)" bash -c '! grep -q "회차: 좁은 확인" <<<"$0" && grep -q -- "--effort high" <<<"$0"' "$o"
+printf 'F-01-RV\ttask_r\tctx_r1\tf-01-rv\t2026-01-01 10:00:00\tclaude\tclaude-opus-5-5\thigh\t\t\t\n' >> orchestration/state/dispatch.tsv
+o=$(KIT_RUN=run_x $T/launch.sh --dry-run --review F-01 2>&1); check "검토 2회차: 좁은 확인이라 effort 한 단계 낮춤(high → medium)" bash -c 'grep -q "검토 2회차: 좁은 확인이라 effort high → medium" <<<"$0" && grep -q -- "--effort medium" <<<"$0"' "$o"
+o=$(KIT_RUN=run_x $T/launch.sh --dry-run --review --effort high F-01 2>&1); check "검토 2회차라도 --effort를 주면 그것" bash -c '! grep -q "좁은 확인" <<<"$0" && grep -q -- "--effort high" <<<"$0"' "$o"
+cp "$W/kit.yaml.pre-rv" orchestration/kit.yaml; cp "$W/dispatch.pre-rv" orchestration/state/dispatch.tsv
 printf -- '- 오류 입력 처리 누락\n' > "$W/notes.md"
 o=$(KIT_RUN=run_x $T/launch.sh --dry-run --retry "$W/notes.md" --suffix r1 F-01 2>&1); check "--retry 명세에 지적 포함" grep -q '오류 입력 처리 누락' orchestration/specs/F-01.retry-r1.md
 check "task-yaml effort만 있으면 경고" bash -c "python3 - <<'PY'
@@ -155,6 +162,14 @@ check "kitlib.suggest_slots: 코어 4·메모리 8 GiB당 1, 1~8" python3 -c "
 import sys; sys.path.insert(0,'$T'); import kitlib as k
 assert (k.suggest_slots(16,64),k.suggest_slots(4,8),k.suggest_slots(2,4),k.suggest_slots(16,16),k.suggest_slots(128,1024))==(4,1,1,2,8)"
 check "설치: kit.yaml slots.test에 기계 기준 제안값과 근거" grep -Eq '^  test: [1-8] +# 설치 기계\(코어 [0-9]+·메모리 [0-9]+ GiB\) 기준 제안' orchestration/kit.yaml
+# run_logged: 시간 제한·한 번의 호출(요약만)·묶음 전체 정리
+printf '#!/bin/bash\necho "FAILED tests/test_a.py::test_x - assert 1"\nexec python3 -X faulthandler -c "\ndef spin():\n    while True: pass\nspin()"\n' > "$W/hang.sh"; chmod +x "$W/hang.sh"
+o=$(KIT_RUN_GRACE=2 $T/run_logged.sh 2 "$W/rl/hang.log" -- "$W/hang.sh"); rc=$?
+check "run_logged: 시간 제한이면 rc 124 · SIGABRT로 파이썬 스택이 로그에 · 실패 이름 요약" bash -c 'test "$2" = 124 && grep -q "시간 제한 2초로 끝냄 rc=124" <<<"$0" && grep -q "FAILED tests/test_a.py::test_x" <<<"$0" && grep -q "in spin" "$1" && ! grep -q "코어 덤프" <<<"$0"' "$o" "$W/rl/hang.log" "$rc"
+check "run_logged: 시간 제한 뒤 남은 프로세스 없음" bash -c '! pgrep -f "[d]ef spin" >/dev/null'
+o=$($T/run_logged.sh 20 "$W/rl/ok.log" -- bash -c 'echo hi; (sleep 300; :) & exit 3'); rc=$?
+check "run_logged: 명령 종료코드 그대로 · 출력은 로그로만 · 남은 묶음 정리" bash -c 'test "$2" = 3 && grep -q "rc=3" <<<"$0" && grep -q "^hi$" "$1" && grep -Eq "남은 프로세스 [0-9]+개를 정리" "$1" && ! pgrep -f "[s]leep 300" >/dev/null' "$o" "$W/rl/ok.log" "$rc"
+check "run_logged: 끝나면 실행 표시 파일 없음" bash -c 'test -z "$(ls "$(git rev-parse --git-common-dir)/orca-kit/runs/" 2>/dev/null)"'
 
 echo "[8] bootstrap · cleanup"
 check "bootstrap --step 필수" bash -c "! $KIT bootstrap --target $R --dry-run 2>/dev/null"
@@ -370,9 +385,14 @@ tight = os.environ.get("FAKE_SW") == "tight"   # 다른 구독: 세션 60%가 10
 def out(o): print(json.dumps(o)); sys.exit(0)
 if a.startswith("account list"):
     ok = lambda u, m, r: {"usedPercent": u, "windowMinutes": m, "resetsAt": r}
-    out({"ok": True, "result": {"rateLimits": {
+    accts = {}
+    if os.environ.get("FAKE_SW_ACCTS"):   # Orca 실제 꼴: 계정 목록 + 고른 계정(readingAccount)의 한도만
+        accts = {"claude": {"activeAccountId": "bbbbbbbb-2", "accounts": [{"id": "aaaaaaaa-1", "home": "/x/claude-profiles/aaaaaaaa-1/home"},
+                                                                       {"id": "bbbbbbbb-2", "home": "/x/claude-profiles/bbbbbbbb-2/home"}]}}
+    out({"ok": True, "result": {**accts, "rateLimits": {
         "codex": {"provider": "codex", "status": "ok", "session": ok(used, 300, reset), "weekly": ok(40, 10080, now + 100 * h)},
-        **{p: dict({"provider": p, "status": "ok", "weekly": ok(10, 10080, now + 100 * h)},
+        **{p: dict({"provider": p, "status": "ok", "weekly": ok(10, 10080, now + 100 * h),
+                    **({"usageMetadata": {"readingAccount": {"accountId": "bbbbbbbb-2"}}} if p == "claude" and accts else {})},
                    **({"session": ok(60, 300, now + 200 * 60 * 1000)} if tight else {})) for p in ("claude", "grok", "antigravity")}}}})
 if "worker-list" in a:
     ws = [{"dispatchId": os.environ.get("FAKE_SW_DID", "ctx_5a1"), "taskId": "task_5a1", "state": "running",
@@ -382,6 +402,12 @@ if "worker-list" in a:
                    "workspace": "ws-5a1::" + os.environ["FAKE_SW_WT"]})
     out({"ok": True, "result": {"workers": ws}})   # Orca 실제 꼴: <워크스페이스 ID>::<경로>
 if "task-list" in a: out({"ok": True, "result": {"tasks": [{"id": "task_5a1", "title": os.environ.get("FAKE_SW_TITLE", "X-SW")}]}})
+if "worker-show" in a:   # 확인 창 대기(Orca observation.agentWait)
+    if os.environ.get("FAKE_SW_WAIT") == "rm":
+        out({"ok": True, "result": {"waitingOnHuman": True, "observation": {"agentWait": {"evidence": "prompt-text",
+             "prompt": 'Bash: rm -f "$EV/$f.raw.log" · Do you want to proceed?'}}}})
+    out({"ok": True, "result": {"waitingOnHuman": False}})
+if "orchestration deny" in a: out({"ok": True, "result": {"denied": True}})
 if "worker-read" in a and "--source terminal" in a:
     scr = ["› 경계 입력을 만든다", "ⓘ This content can’t be shown", "  We take extra care with some cybersecurity requests. If you’re doing authorized", "› gpt-6.2-sol"] \
         if os.environ.get("FAKE_SW_SCREEN") == "filter" else ["› 시험을 돌린다", "ok"]
@@ -412,6 +438,10 @@ if "inbox" in a:
         body, pl = body[:221] + "… (truncated; --full)", {"taskId": "task_5a1", "dispatchId": did_}
     msgs = [{"id": "msg_stop_e5c1", "type": "escalation", "handled": True, "subject": "Worker stopped on an error without reporting",
              "body": body, "payload": pl}] if lo else []
+    if os.environ.get("FAKE_SW_WAIT") == "rm" and os.environ.get("FAKE_SW_APPROVAL"):
+        msgs.append({"id": "msg_perm_1", "type": "escalation", "handled": False, "subject": "Worker is waiting on a permission prompt",
+                     "body": "rm -f \"$EV/$f.raw.log\"", "payload": json.dumps({"dispatchId": os.environ.get("FAKE_SW_DID", "ctx_5a1"),
+                                                                                  "approvalId": os.environ["FAKE_SW_APPROVAL"]})})
     out({"ok": True, "result": {"messages": msgs}})
 if "worker-stop" in a or "worker-release" in a or a.startswith("orchestration send"): out({"ok": True, "result": {}})
 if a.startswith("automations create"): out({"ok": True, "result": {"automation": {"id": "auto-1", "enabled": True}}})
@@ -480,7 +510,7 @@ check "quota_switch --due: 할 일 없으면 1" bash -c "! FAKE_SW=free $SW pyth
 : > "$W/sw/calls.log"; rm -f orchestration/state/quota_cache.json orchestration/state/quota_watch.json
 check "watch precheck: 할 일 없으면 1 · 메일 없음" bash -c "! FAKE_SW=free $SW python3 $T/quota_watch.py precheck && ! grep -q 'orchestration send' $W/sw/calls.log"
 rm -f orchestration/state/quota_cache.json
-check "watch precheck: 한도 정지면 매니저 Run에 알림 · 그래도 1" bash -c "! $SW python3 $T/quota_watch.py precheck && grep -q 'orchestration send --to run:run_sw --type status --subject 한도 점검: 한도 정지·필터 중단 1' $W/sw/calls.log"
+check "watch precheck: 한도 정지면 매니저 Run에 알림 · 그래도 1" bash -c "! $SW python3 $T/quota_watch.py precheck && grep -q 'orchestration send --to run:run_sw --type status --subject 예약 점검: 한도 정지·필터 중단 1' $W/sw/calls.log"
 check "watch precheck: 같은 내용은 다시 알리지 않음" bash -c "! $SW python3 $T/quota_watch.py precheck && test \$(grep -c 'orchestration send --to run:run_sw' $W/sw/calls.log) -eq 1"
 o=$($SW python3 $T/quota_watch.py install --every 10 2>&1)
 check "watch install: Orca 예약 실행(10분, 사전 확인 절대 경로) 등록·기록" bash -c 'grep -q "등록: .* (auto-1)" <<<"$0" && grep -q -- "automations create .*--trigger \*/10 \* \* \* \* .*--precheck cd .* && ORCA_CLI_COMMAND=.* orchestration/tools/quota_watch.py precheck" "$1/calls.log" && grep -q auto-1 orchestration/state/quota_watch.json' "$o" "$W/sw"
@@ -612,6 +642,52 @@ check "현황: 워커 줄에 슬롯 대기, 슬롯 요약 줄" bash -c 'grep -q 
 wait $sh2; wait $sh1
 o=$(FAKE_SW=free FAKE_SW_DID=ctx_9z9 $SW python3 $T/status.py --stall 2>&1)
 check "슬롯이 비면 표시가 사라진다(대기·잡음 표시 파일 정리)" bash -c '! grep -q "슬롯" <<<"$0" && ! ls "$(git rev-parse --git-common-dir)"/orca-kit/slots/ | grep -q "holder\|wait"' "$o"
+# 확인 창 대기(빈 변수 의심 rm): 고쳐 쓸 꼴과 deny 명령 · 예약 점검은 승인 ID를 알면 스스로 거절(한 번만)
+o=$(FAKE_SW=free FAKE_SW_DID=ctx_9z9 FAKE_SW_WAIT=rm FAKE_SW_APPROVAL=apr_1 $SW python3 $T/status.py --stall 2>&1)
+check "정지 점검: 확인 창 대기 · 빈 변수 의심 rm → 고쳐 쓸 꼴 · deny 명령(승인 ID)" bash -c 'grep -q "확인 창 대기 X-SW (ctx_9z9): prompt-text" <<<"$0" && grep -q "{EV:?}" <<<"$0" && grep -q "orca orchestration deny --dispatch ctx_9z9 --prompt apr_1" <<<"$0"' "$o"
+: > "$W/sw/calls.log"; rm -f orchestration/state/quota_watch.json orchestration/state/quota_cache.json
+FAKE_SW=free FAKE_SW_DID=ctx_9z9 FAKE_SW_WAIT=rm FAKE_SW_APPROVAL=apr_1 $SW python3 $T/quota_watch.py precheck; rc=$?
+check "예약 점검: 빈 변수 의심 rm 확인 창을 거절하고 알린다(그래도 1)" bash -c 'test "$1" = 1 && grep -q "orchestration deny --dispatch ctx_9z9 --prompt apr_1 --reason 빈 변수 의심 rm" "$0/calls.log" && grep -q "subject 예약 점검: 멈춤 1 · 자동 거절 1" "$0/calls.log"' "$W/sw" "$rc"
+FAKE_SW=free FAKE_SW_DID=ctx_9z9 FAKE_SW_WAIT=rm FAKE_SW_APPROVAL=apr_1 $SW python3 $T/quota_watch.py precheck
+check "예약 점검: 같은 승인은 다시 거절하지 않음" test "$(grep -c '^orchestration deny' "$W/sw/calls.log")" -eq 1
+rm -f orchestration/state/quota_watch.json
+if [ -d /proc/self ]; then
+  cp orchestration/kit.yaml "$W/kit.yaml.pre-lc"; sed -i 's/^  long_cmd_min: 30\b.*/  long_cmd_min: 0/' orchestration/kit.yaml
+  (cd "$W/wt-x-sw" && exec bash -c 'sleep 60; :' fakepytest) & lc=$!
+  sleep 0.5
+  o=$(FAKE_SW=free FAKE_SW_DID=ctx_9z9 $SW python3 $T/status.py --stall 2>&1)
+  check "정지 점검: 워커 워크트리에서 시간 제한 없이 도는 시험 → 긴 명령(pid·kill -ABRT)" bash -c 'grep -q "긴 명령 X-SW (ctx_9z9): .bash -c sleep 60; : fakepytest. 0분째, 시간 제한 없음 (pid $1)" <<<"$0" && grep -q "kill -ABRT $1" <<<"$0"' "$o" "$lc"
+  : > "$W/sw/calls.log"; rm -f orchestration/state/quota_cache.json
+  FAKE_SW=free FAKE_SW_DID=ctx_9z9 $SW python3 $T/quota_watch.py precheck
+  check "예약 점검: 긴 명령도 매니저를 깨운다" bash -c 'grep -q "subject 예약 점검: 멈춤 1" "$0/calls.log" && grep -q "긴 명령 X-SW" "$0/calls.log"' "$W/sw"
+  kill $lc 2>/dev/null; wait $lc 2>/dev/null; rm -f orchestration/state/quota_watch.json
+  (cd "$W/wt-x-sw" && exec "$T/run_logged.sh" 60 "$W/rl/lc.log" -- bash -c 'sleep 60; :' fakepytest) >/dev/null & rl=$!
+  sleep 1
+  o=$(FAKE_SW=free FAKE_SW_DID=ctx_9z9 $SW python3 $T/status.py 2>&1)
+  check "run_logged로 띄운 시험은 '긴 명령' 경보가 아니라 제한과 함께 표시" bash -c '! grep -q "^- 긴 명령" <<<"$0" && grep -q "^- X-SW ctx_9z9 .*· 긴 명령 0분째(제한 1분)" <<<"$0"' "$o"
+  kill -TERM $rl; wait $rl 2>/dev/null
+  check "run_logged를 끄면 묶음도 끝난다" bash -c '! pgrep -f "[s]leep 60; : fakepytest" >/dev/null'
+  cp "$W/kit.yaml.pre-lc" orchestration/kit.yaml
+fi
+# 문맥 크기: 진행 중 워커의 세션 기록(마지막 호출의 캐시 읽기+쓰기+입력) · usage.py 작업별 표
+sl=$(python3 -c "import re,sys,os;print(re.sub(r'[^A-Za-z0-9]','-',os.path.realpath(sys.argv[1])))" "$W/wt-x-sw")
+mkdir -p "$W/cc/projects/$sl"; now_iso=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+for i in 1 2; do printf '{"type":"assistant","timestamp":"%s","message":{"id":"m%s","model":"claude-opus-5-5","usage":{"input_tokens":10,"cache_creation_input_tokens":1000,"cache_read_input_tokens":%s},"content":[{"type":"tool_use","name":"Bash","input":{"command":"%s"}}]}}\n' "$now_iso" $i $((i * 200000)) "$([ $i = 2 ] && echo 'scripts/dev/test.sh api' || echo ls)"; done > "$W/cc/projects/$sl/s1.jsonl"
+export KIT_TRANSCRIPT_DIRS="$W/cc" KIT_CODEX_SESSIONS="$W/codex-none"
+o=$(FAKE_SW=free FAKE_SW_DID=ctx_9z9 $SW python3 $T/status.py 2>&1)
+check "현황: 워커 줄에 지금 문맥·호출 수, 기준(300k) 넘으면 '문맥 큼'" bash -c 'grep -q "^- X-SW ctx_9z9 .*· 문맥 401k·호출 2 (기준 넘음)" <<<"$0" && grep -q "문맥 큼 X-SW (ctx_9z9): 지금 401k · 호출 2 (기준 300k)" <<<"$0"' "$o"
+o=$(python3 $T/usage.py --since 1h 2>&1)
+check "usage.py: 작업별 호출 수·호출당 문맥·합계·시험 관련 비중" bash -c 'grep -q "| X-SW | claude s1 | claude-opus-5-5 | 2 | 301k | 401k | 602k | 67% |" <<<"$0"' "$o"
+unset KIT_TRANSCRIPT_DIRS KIT_CODEX_SESSIONS
+# 계정별 한도: Orca는 고른 계정만 준다 → 다른 계정은 마지막으로 읽은 값, 이 세션의 계정 표시
+python3 -c '
+import json, time
+json.dump({"claude": {"active": "aaaaaaaa-1", "accounts": {"aaaaaaaa-1": {"windows": {"weekly": {"used": 77.0, "minutes": 10080, "resets": 0}}, "seen": time.time() - 3600}}}},
+          open("orchestration/state/quota_accounts.json", "w"))'
+rm -f orchestration/state/quota_cache.json
+o=$(CLAUDECODE=1 CLAUDE_CONFIG_DIR=/x/claude-profiles/aaaaaaaa-1/home FAKE_SW=free FAKE_SW_ACCTS=1 $SW python3 $T/models.py quota 2>&1)
+check "models.py quota: 계정별 — 고른 계정은 지금 값, 다른 계정은 마지막 값과 나이, 이 세션 표시" bash -c 'grep -q "^- claude aaaaaaaa: weekly 77% (60분 전 값) · 이 세션$" <<<"$0" && grep -q "^- claude bbbbbbbb · 선택됨(새 워커가 쓴다): weekly 10%" <<<"$0"' "$o"
+rm -f orchestration/state/quota_accounts.json orchestration/state/quota_cache.json
 unset FAKE_SW_DID FAKE_SW_TITLE
 $M cooldown claude --min 1440 --reason 'Orca에서 꺼진 에이전트' >/dev/null   # 위에서 푼 쿨다운을 되돌린다(뒤 대시보드 시험이 쓴다)
 cp "$W/models.yaml.pre-sw" orchestration/models.yaml; cp "$W/kit.yaml.pre-sw" orchestration/kit.yaml

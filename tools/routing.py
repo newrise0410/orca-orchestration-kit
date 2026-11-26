@@ -662,9 +662,61 @@ def parse_quota(res):
                 ws = {k: _win(r.get(k)) for k in ("session", "weekly") if _win(r.get(k))}
                 if ws:
                     alt.append(ws)
+        acct = (((v.get("usageMetadata") or {}).get("readingAccount")) or {}).get("accountId")
         out[prov] = {"status": v.get("status"), "plan": v.get("planType"), "windows": {k: w for k, w in wins.items() if w},
-                     "groups": groups, "alt": alt, "updated": float(v.get("updatedAt") or 0) / 1000}
+                     "groups": groups, "alt": alt, "updated": float(v.get("updatedAt") or 0) / 1000, "account": acct}
     return out
+
+
+# 계정별 한도: Orca는 고른 계정(readingAccount)의 한도만 준다. 워커용 계정을 따로 고르면(orca account select)
+# 매니저·마스터가 도는 계정의 한도가 사라지므로, 계정마다 마지막으로 읽은 값을 state/quota_accounts.json에 남긴다(ID·숫자만).
+def _save_accounts(repo, res, prov):
+    p = state_dir(repo) / "quota_accounts.json"
+    try:
+        d = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
+    except (OSError, json.JSONDecodeError):
+        d = {}
+    now = time.time()
+    for ag, v in (res or {}).items():
+        if not isinstance(v, dict) or not isinstance(v.get("accounts"), list):
+            continue
+        e = d.setdefault(ag, {"accounts": {}})
+        e["active"] = v.get("activeAccountId")
+        for a in v["accounts"]:
+            if isinstance(a, dict) and a.get("id"):
+                e["accounts"].setdefault(a["id"], {}).update(home=a.get("home") or "", provider_id=a.get("providerAccountId") or "")
+    for pv, info in (prov or {}).items():
+        acct = info.get("account")
+        if acct and info.get("status") == "ok":
+            ag = pv if pv in d else next((k for k in d if pv.startswith(k)), pv)
+            d.setdefault(ag, {"accounts": {}})["accounts"].setdefault(acct, {}).update(
+                windows=info.get("windows") or {}, plan=info.get("plan"), seen=now)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def read_accounts(repo):
+    """{agent: {active, accounts{id: {home, windows, plan, seen}}}} — 계정별 마지막 한도."""
+    try:
+        return json.loads((state_dir(repo) / "quota_accounts.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def session_account(agent):
+    """이 프로세스(매니저·마스터 세션)가 도는 계정 ID. Orca가 계정 폴더를 환경으로 준다. 모르면 None."""
+    in_claude = bool(os.environ.get("CLAUDECODE"))   # Claude Code 안에서 돈다. Orca는 두 계정 폴더를 모든 세션에 넘긴다
+    if agent == "claude" and in_claude:
+        v = os.environ.get("CLAUDE_CONFIG_DIR") or os.environ.get("ORCA_CLAUDE_CONFIG_DIR") or ""
+    elif agent == "codex" and not in_claude:
+        v = os.environ.get("ORCA_CODEX_HOME") or os.environ.get("CODEX_HOME") or ""
+    else:
+        return None
+    m = re.search(r"(?:claude-profiles|codex-accounts)/([0-9a-f-]{8,})", v)
+    return m.group(1) if m else None
 
 
 def read_quota(repo, refresh=False, net=True, timeout=15):
@@ -684,6 +736,7 @@ def read_quota(repo, refresh=False, net=True, timeout=15):
         d = json.loads(out)
         if d.get("ok"):
             prov = parse_quota(d.get("result") or {})
+            _save_accounts(repo, d.get("result") or {}, prov)
     except (json.JSONDecodeError, AttributeError, TypeError):
         prov = {}
     try:

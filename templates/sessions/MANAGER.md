@@ -43,7 +43,7 @@
 | 모델 라우팅 미리보기 | `python3 orchestration/tools/models.py plan` (투입 가능 전체) · `route <ID>` (근거·다음 후보) · `discover` (쓸 수 있는 구독·모델) |
 | 모델 실적·사용량 | `models.py stats` (모델별 결과 점수, 구독별 오늘·7일 사용량) |
 | 사용량 한도로 멈춘 워커 | 정지 점검의 `한도 정지` → `python3 orchestration/tools/quota_switch.py` (진행분을 `wip/<ID>-quota-*`에 보존 → 워커 정리 → 같은 워크트리에서 다른 구독으로 이어받기. 곧 풀리거나 검토 독립성을 못 지키면 대기). 미리 보기 `--dry-run` |
-| 자는 동안의 한도 정지·풀림 알림 | 운영을 시작할 때 한 번 `python3 orchestration/tools/quota_watch.py install` (Orca 예약 실행이 10분마다 사전 확인만 돌려, 할 일이 있으면 이 Run에 '한도 점검' 메일을 보낸다. 에이전트는 띄우지 않는다). 끝낼 때 `remove` |
+| 자는 동안의 한도·멈춤 알림 | 운영을 시작할 때 한 번 `python3 orchestration/tools/quota_watch.py install` (Orca 예약 실행이 10분마다 사전 확인만 돌려, 한도 정지·한도 풀림·커밋 없음·긴 명령·확인 창 대기가 있으면 이 Run에 '예약 점검' 메일을 보낸다. 빈 변수 의심 rm 확인 창은 승인 ID를 알면 스스로 거절한다. 에이전트는 띄우지 않는다). 끝낼 때 `remove`. `stall_watch.py`는 같은 것의 다른 이름 |
 | 한도에 걸릴 구독을 미리 빼기 | `models.py cooldown <codex\|claude\|antigravity\|grok> --min 120 --reason '한도'` (라우팅은 Orca 잔여 한도를 보고 소진 구독을 스스로 뺀다: `models.py quota`) |
 | 이번만 모델 바꾸기 | `launch.sh --agent codex --model <id> --effort high <ID>` (작업에 고정: 항목에 `route: <카탈로그 키>`) |
 | status 갱신 | `python3 orchestration/tools/task_status.py <ID> review\|merged` |
@@ -53,6 +53,8 @@
 | int/common → {{MAIN_BRANCH}} 반영·전파 | `orchestration/tools/sync_main.sh [--all] [--push]` (체크아웃을 바꾸지 않는다. 원격은 `--push`일 때만) |
 | 끝난 워크트리 정리 | `python3 orchestration/tools/worktree_sweep.py` (미리 보기) → `--apply`. launch.sh가 한 시간에 한 번 저절로 한다(kit.yaml `cleanup.auto_sweep`). '확인 필요'는 이유를 보고 처리: 커밋하지 않은 변경·머지 안 된 커밋은 워커에 묻거나 보존, 주인 없는 것은 `--orphans`(메인에 다 들어 있을 때만) |
 | 머지 뒤 하나만 정리 | `orchestration/tools/cleanup_worker.sh <워크트리> <브랜치> <상위 브랜치>` (네 조건) |
+| 긴 명령(시간 제한·한 번의 호출) | `orchestration/tools/run_logged.sh <초> <로그> -- <명령>` (병합 확인의 빌드·전체 시험·스모크도) |
+| 작업별 토큰(호출 수 × 문맥) | `python3 orchestration/tools/usage.py --since 6h` (지표 문서의 작업별 행) |
 | 전체 시험 동시 수 제한 | `orchestration/tools/slot.sh test -- <시험 명령>` (줄은 status.py의 '슬롯 대기'·'슬롯 줄', 수는 kit.yaml `slots.test`) |
 
 ## 3. 운영 규칙
@@ -76,10 +78,10 @@
 - **같은 계열 차단 2회면 범위 결정(L-22).** 검토 판정에 계열을 남기고(`models.py feedback … --category`), 정지 점검의 '범위 결정 필요'가 나오면 고치기를 한 번 더 내지 말고 범위 선택지를 올린다(`procedures/review.md` 3).
 - **핵심 약속 점검표(L-22).** 검토가 되풀이해 잡는 지적은 `orchestration/checklist.md` '항목'에 넣는다. 구현·보완·이어받기 명세에 붙고, 워커는 항목마다 시험 이름을 보고한다. 목표: 첫 검토 차단 0~1건.
 - **결함 수정과 새 기능을 한 작업에 섞지 않는다(L-10).** 수정 → 머지 → 검토를 먼저 끝내고 새 기능은 별도 작업으로 낸다.
-- **대형 구현은 미리 쪼갠다(L-13).** 한 세션이 소화하는 양은 경험상 4묶음 안팎이다. 크면 차수(`<ID>a`, `<ID>b`)로 낸다. '부분 완료' 보고가 오면 남은 목록으로 다음 차수를 낸다.
+- **대형 구현은 미리 쪼갠다(L-13, L-23).** 한 작업은 워커의 문맥이 기준(`status.context_warn_k`, 기본 30만 토큰)을 넘기 전에 끝나는 크기로 자른다. 비용은 호출 수 × 그때의 문맥이라 작업 길이의 제곱에 가깝게 는다(현장: 한 작업이 호출당 45만 토큰을 읽어 구현 셋을 합친 만큼 썼다). 정지 점검의 '문맥 큼'이 그 신호다. 작업별 실측은 `usage.py`. 한 세션이 소화하는 양은 경험상 4묶음 안팎이다. 크면 차수(`<ID>a`, `<ID>b`)로 낸다. '부분 완료' 보고가 오면 남은 목록으로 다음 차수를 낸다.
 - **통합 세션의 머지 거부를 존중한다.** L1이 스모크 실패로 되돌리면 원인을 붙여 req 워커에 보완을 낸다(`--retry`).
 - **멈춘 워커:** escalation(`needs-input` 등)이 오면 `worker-show`·`worker-read`로 원인을 본다. `send`로 풀 수 있으면 직접 푼다. 화면 승인이 필요하면 마스터에 올린다(어느 워커가 무엇을 기다리는지).
-- **{{MAIN_BRANCH}} 머지 관문 = 범위 확인 → build → 전체 시험 → 체계 스모크(기본 설정).** 관문 전에 `procedures/merge-gate.md`를 읽는다. 관문을 통과하지 않은 후보는 올리지 않는다.
+- **{{MAIN_BRANCH}} 머지 관문 = 범위 확인 → build → 전체 시험 → 체계 스모크(기본 설정).** 단계마다 `run_logged.sh <초> <로그> -- …`로 돌린다(시간 제한·한 번의 호출). 검토자는 전체 시험을 다시 돌리지 않으므로 합친 상태의 전체 시험은 여기서 한 번이다. 관문 전에 `procedures/merge-gate.md`를 읽는다. 관문을 통과하지 않은 후보는 올리지 않는다.
 - **원격 push:** {{PUSH_POLICY}}
 - **동시 실행:** 세션 수가 아니라 자원으로 제한한다. 2개씩 늘리며 5분씩 지표를 보고, 안전선을 넘으면 그때 수 − 2를 실측 한도로 기록한다. 전체 시험은 `slot.sh`, 무거운 실행은 HEAVY 슬롯.
 - **종료 정리:** 끝난 워커 워크트리는 `worktree_sweep.py`가 정리한다(launch.sh가 한 시간에 한 번, 잃을 것이 없는 것만). 정지 점검의 '워크트리 확인 필요'는 이정표마다 목록을 보고 닫는다. 하나만 바로 지울 때는 `cleanup_worker.sh`.
@@ -95,6 +97,9 @@
   - **'필터 중단'**(워커의 마지막 응답이 안전 필터·이용 정책 차단으로 끊김: 살아 보여도 일하지 않는다)도 `quota_switch.py`로 넘긴다. 같은 절차로 다른 구독이 이어받고, 그 모델은 그 작업의 재투입 후보에서 빠진다. 증거 문구가 오탐이면(차단이 아니라 워커가 정책을 설명한 글) 넘기지 말고 `--no-read`로 점검한다. codex 안전 필터 안내는 화면에만 찍히므로 정지 점검이 터미널 화면 끝과 Orca escalation 메일(stopReason=errored)의 Last output도 본다. **'오류 중단'**(errored인데 한도도 차단 문구도 아님)은 메일의 Last output·`worker-read`로 직접 보고 분류한다(새 차단 문구면 키트에 알린다).
   - **'한도 정지'·'한도 풀림'이 나오면 `quota_switch.py`를 돌린다**(설정 `routing.quota.on_exhausted`, 기본 switch). 대기 판정(곧 풀림·다른 구독도 한도·검토 독립성)이면 풀리는 시각을 기록해 두고, 그 뒤에 이 도구가 돌 때 워커에게 '이어서 하라'를 보낸다. 풀리는 시각이 지나서 깨어나면 `--stall`이 '한도 풀림'으로 알린다. `quota_watch.py install`을 해 두면 자는 동안에도 '한도 점검' 메일이 와서 깨어난다.
   - '커밋 없음'은 마지막 커밋과 이 투입의 시작 중 늦은 쪽으로 잰다(보완 워커가 앞 차수 브랜치를 써도 오탐하지 않는다).
+  - **워커가 '기다리는 중'·'끝나면 보고'로 턴을 끝낸 뒤 평소 걸리는 시간의 두 배가 지나면 화면과 프로세스를 본다.** 정지 점검의 '긴 명령'(시간 제한 없이 30분 넘게 도는 시험·빌드)이 그 자리다. 멈춘 pytest는 `kill -ABRT <pid>`로 스택을 남기고 끝낸 뒤 그 스택을 원인으로 붙여 보완을 낸다. 워커는 보고가 와야 매니저를 깨우므로 `quota_watch.py install`을 해 둔다(현장: 시간 제한 없는 전체 시험이 3시간 20분 멈췄다, L-23).
+  - **'확인 창 대기'**: 빈 변수 의심 rm이면 정지 점검이 보여 주는 `orchestration deny … --reason`으로 거절하고 고쳐 쓸 꼴을 보낸다(워커는 계속한다). 그 밖의 확인 창은 명세·규칙으로 답할 수 있으면 답하고, 아니면 마스터에 올린다.
+  - '문맥 큼': 그 워커가 끝난 묶음까지 커밋하고 부분 완료로 넘기게 한다(`send`). 다음 차수는 더 작게 자른다.
   - '커밋 없음'·'attention'·'running 고아'는 `worker-show`·`worker-read`로 화면 끝을 보고 분류한다. load가 0에 가까운데 '진행 중'이면 대기 루프나 프롬프트에 멈춘 것이다.
 - **분류해 한 줄로 보고한다:** `send --to run:{{MASTER_RUN}} --type status --subject '정지 점검' --body '실행 중 N, 최고령 커밋 <시각>. <ID>: 세션 종료|대기(<무엇>)|할당 누락 → <조치>'`. **세션 종료**(문맥 소진·비정상 종료 → 남은 목록으로 새 작업), **대기**(승인 프롬프트·ask 답·사용자 결정 → 풀 수 있으면 풀고 아니면 올림), **할당 누락**(→ 바로 낸다). 이상이 없으면 보고하지 않는다.
 

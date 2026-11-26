@@ -55,6 +55,18 @@ review:
   model: ""
   effort: ""
   scope_escalate_after: 2      # 같은 작업에서 같은 차단 계열(models.py feedback --category)이 이만큼 연속이면 정지 점검이 '범위 결정 필요'
+  recheck_effort_step: 1       # 같은 작업의 2회차 이후 검토(좁은 확인)는 effort를 이만큼 낮춘다(0이면 그대로, --effort를 주면 그것)
+
+# 멈춤 감시: status.py 정지 점검과 예약 점검(quota_watch.py install)이 쓴다
+watch:
+  stall: true                  # 예약 점검이 한도 말고 멈춤(커밋 없음·긴 명령·확인 창 대기)에도 매니저를 깨운다
+  stale_min: 60                # 예약 점검의 '커밋 없음' 기준(분)
+  long_cmd_min: 30             # 시간 제한 없는 시험·빌드 명령이 이보다 오래 돌면 '긴 명령'
+  long_cmd_pattern: 'pytest|test\.sh|build\.sh|smoke|vitest|jest|cargo test|go test|npm (?:run )?test|ctest|colcon test|\bmake\b'
+  auto_deny_rm: true           # 빈 변수 의심 rm 확인 창을 예약 점검이 거절하고 고쳐 쓸 꼴을 보낸다(승인 ID를 찾을 때만)
+
+status:
+  context_warn_k: 300          # 진행 중 워커의 지금 문맥이 이 천 토큰을 넘으면 '문맥 큼'
 
 # 워크트리 사이 동시 실행 슬롯 (orchestration/tools/slot.sh <이름> -- <명령>)
 slots:
