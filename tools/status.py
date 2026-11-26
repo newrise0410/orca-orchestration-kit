@@ -15,6 +15,12 @@
   attention   Orca가 워커에 주의 표시(입력 대기 프롬프트 등) → worker-show / worker-read로 원인 확인
   슬롯 대기   워커가 slot.sh 줄에서 기다린다(전체 시험 동시 수 제한). 일하지 않는 것이 아니라 차례를 기다리는 중이라 '커밋 없음' 대신
               이것을 보인다. 줄이 길면(대기 ≥ 슬롯 수 또는 10분 넘게) '슬롯 줄' 한 줄과 이 기계 기준 제안 슬롯 수를 같이 보인다
+  긴 명령     진행 중 워커의 워크트리에서 시험·빌드 명령(watch.long_cmd_pattern)이 시간 제한 없이 watch.long_cmd_min(기본 30)분 넘게
+              돈다(Linux /proc) → 화면 확인, 멈췄으면 `kill -ABRT <pytest pid>`로 스택을 남기고 끝낸다. run_logged.sh로 띄운 것은
+              제한이 있어 줄에 '제한 N분'만 붙이고, 제한을 넘겨도 돌면 '긴 명령 제한 넘김'
+  확인 창 대기 워커가 사람만 답할 수 있는 확인 창에 서 있다(Orca worker-show waitingOnHuman·observation.agentWait).
+              빈 변수 의심 rm이면 고쳐 쓸 꼴과 deny 명령을 같이 보인다(quota_watch 예약 점검이 승인 ID를 알면 스스로 거절한다)
+  문맥 큼     진행 중 워커의 지금 문맥(세션 기록의 마지막 호출)이 status.context_warn_k(기본 300)천 토큰을 넘음 → 남은 일을 다음 차수로 자른다
   커밋 없음    진행 중인데 마지막 커밋과 이 투입의 시작 중 늦은 쪽이 stale-min보다 오래됨 → worker-read로 화면 끝 확인
               (보완 워커가 앞 차수와 같은 브랜치를 쓰면 앞 차수 커밋이 마지막 커밋이라, 투입 시각이 더 늦으면 그것을 기준으로 잰다)
   running 고아 tasks.yaml은 running인데 진행 중 워커가 없음 → 끝났으면 review/merged, 멈췄으면 재투입
@@ -174,7 +180,7 @@ def collect(repo, cfg, a):
     for k in active_ids:
         s = str(tasks[k].get("status", "todo")).lower()
         st[s] = st.get(s, 0) + 1
-    out = {"project": kitlib.cfg_get(cfg, "project.name", ""), "dag": {"errors": res["errors"], "warnings": res["warnings"],
+    out = {"_cfg": cfg, "project": kitlib.cfg_get(cfg, "project.name", ""), "dag": {"errors": res["errors"], "warnings": res["warnings"],
            "tasks": len(active_ids), "archived": res["stats"].get("archived", 0), "status": st},
            "ready": [i for i in active_ids if kitlib.is_ready(tasks[i], tasks, cfg)],
            "gates_ready": [i for i in active_ids if kitlib.is_gate(tasks[i], cfg)
@@ -269,6 +275,27 @@ def collect(repo, cfg, a):
             pass
         out["turn_stops"], out["error_stops"] = ([], []) if getattr(a, "no_read", False) else \
             turn_stops(repo, o, rows, {q["dispatch"] for q in out["quota_stalls"]})
+        out["runs"] = run_marks(repo)
+        out["long_cmds"] = long_cmds(cfg, o["workers"], out["runs"], out.get("slots"))
+        ctx_warn = float(kitlib.cfg_get(cfg, "status.context_warn_k", 300) or 300) * 1000
+        for w in o["workers"]:
+            for m_ in out["runs"]:
+                if _same_tree(m_["worktree"], w["workspace"]) or _under(m_["worktree"], w["workspace"]):
+                    w["run"] = m_
+            if not getattr(a, "no_read", False):
+                hw = human_wait(w["dispatch"])
+                if hw:
+                    aid, atext = approval_id(o, w["dispatch"])
+                    hw.update(approval=aid, rm_unsafe=bool(RM_UNSAFE_RX.search(hw["text"] + " " + atext)))
+                    w["human_wait"] = hw
+            try:
+                import usage
+                u = usage.latest(w["workspace"], since=(w["started"] - 60) if w.get("started") else time.time() - 2 * 86400) \
+                    if w["workspace"] else None
+            except Exception:  # noqa: BLE001
+                u = None
+            if u:
+                w["context"] = {"last": u["last"], "calls": u["calls"], "total": u["total"], "over": u["last"] > ctx_warn}
         try:
             out["quota_waits"] = json.loads((routing.state_dir(repo) / "quota_wait.json").read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -415,6 +442,145 @@ def turn_stops(repo, o, rows, skip):
     return list(found.values()), [e for d, e in errs.items() if d not in found]
 
 
+# ─── 긴 명령 · 확인 창 · 문맥 ───
+LONG_CMD_PATTERN = r"pytest|test\.sh|build\.sh|smoke|vitest|jest|cargo test|go test|npm (?:run )?test|ctest|colcon test|\bmake\b"
+AGENT_COMMS = {"claude", "codex", "node", "agy", "antigravity", "grok", "opencode", "devin", "cursor-agent"}
+# 빈 변수 의심 rm: rm 뒤에 ${VAR:?}가 아닌 $VAR가 온다
+RM_UNSAFE_RX = re.compile(r"\brm\b[^\n|;&]*?\$(?!\{[A-Za-z_][A-Za-z0-9_]*:\?)\{?[A-Za-z_]")
+RM_REWRITE = ('빈 변수 의심 rm: `rm -f "${EV:?}/${f:?}.raw.log"`처럼 ${VAR:?}로 쓰거나 리터럴 경로로, '
+              "삭제는 다른 명령과 한 줄에 묶지 않고 따로 부른다(AGENTS.md 셸 명령)")
+
+
+def run_marks(repo):
+    """run_logged.sh 표시 → [{since, pid, limit, worktree, log, cmd}] (살아 있는 것만)."""
+    d = kitlib.slots_dir(repo)
+    d = d.parent / "runs" if d else None
+    out = []
+    if not d or not d.is_dir():
+        return out
+    for f in d.glob("*.run"):
+        try:
+            ts, pid, lim, wt, log, cmd = (f.read_text(encoding="utf-8").rstrip("\n").split("\t", 5) + [""] * 6)[:6]
+            e = {"since": float(ts), "pid": int(pid), "limit": int(lim), "worktree": wt, "log": log, "cmd": cmd}
+        except (OSError, ValueError):
+            continue
+        if _alive(e["pid"]):
+            out.append(e)
+    return out
+
+
+def proc_table():
+    """Linux /proc → {pid: {ppid, cwd, cmd, comm, age}}. 다른 OS나 읽기 실패면 {}."""
+    base = Path("/proc")
+    if not (base / "stat").is_file():
+        return {}
+    try:
+        btime = next(int(ln.split()[1]) for ln in (base / "stat").read_text().splitlines() if ln.startswith("btime"))
+        hz = os.sysconf("SC_CLK_TCK")
+    except (OSError, StopIteration, ValueError):
+        return {}
+    now, out = time.time(), {}
+    for d in base.iterdir():
+        if not d.name.isdigit():
+            continue
+        try:
+            st = (d / "stat").read_text()
+            rest = st[st.rindex(")") + 2:].split()
+            cwd = os.readlink(d / "cwd")
+            cmd = (d / "cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", "replace").strip()
+            comm = (d / "comm").read_text().strip()
+        except (OSError, ValueError):
+            continue
+        out[int(d.name)] = {"ppid": int(rest[1]), "cwd": cwd, "cmd": cmd, "comm": comm,
+                            "age": now - (btime + int(rest[19]) / hz)}
+    return out
+
+
+def _under(path, root):
+    try:
+        return bool(path and root) and (Path(path).resolve() == Path(root).resolve() or Path(root).resolve() in Path(path).resolve().parents)
+    except OSError:
+        return False
+
+
+def long_cmds(cfg, workers, marks, slots, procs=None):
+    """진행 중 워커별 시간 제한 없는 긴 시험·빌드 명령 → {dispatch: {pid, cmd, age, abrt}}."""
+    procs = proc_table() if procs is None else procs
+    if not procs:
+        return {}
+    rx = re.compile(str(kitlib.cfg_get(cfg, "watch.long_cmd_pattern", LONG_CMD_PATTERN) or LONG_CMD_PATTERN))
+    fenced = {m["pid"] for m in marks} | {e["pid"] for g in (slots or {}).values() for e in g["waiters"]}
+    me = os.getpid()
+    anc = set()   # 제한 있는 실행·슬롯 대기를 감싼 셸(도구의 bash -c 등)도 뺀다
+    for f in fenced:
+        q, n_ = (procs.get(f) or {}).get("ppid", 0), 0
+        while q and q > 1 and n_ < 64:
+            anc.add(q)
+            q, n_ = (procs.get(q) or {}).get("ppid", 0), n_ + 1
+
+    def fenced_by(pid):   # run_logged 아래(제한 있음)이거나 슬롯 대기 중
+        seen = 0
+        while pid and pid > 1 and seen < 64:
+            if pid in fenced:
+                return True
+            pid, seen = (procs.get(pid) or {}).get("ppid", 0), seen + 1
+        return False
+    out = {}
+    for w in workers:
+        wsp = w.get("workspace")
+        if not wsp:
+            continue
+        cands = [(pid, p) for pid, p in procs.items() if pid != me and p["comm"] not in AGENT_COMMS
+                 and _under(p["cwd"], wsp) and rx.search(p["cmd"]) and pid not in anc and not fenced_by(pid)
+                 and "run_logged" not in p["cmd"] and "status.py" not in p["cmd"]]
+        if not cands:
+            continue
+        pid, p = max(cands, key=lambda c: c[1]["age"])
+        py = [c for c in cands if "pytest" in c[1]["cmd"] and c[1]["comm"].startswith(("python", "pytest"))]
+        out[w["dispatch"]] = {"pid": pid, "cmd": p["cmd"], "age": p["age"],
+                              "abrt": min(py, key=lambda c: c[1]["age"])[0] if py else None}
+    return out
+
+
+def human_wait(did):
+    """Orca worker-show → 확인 창 대기면 {evidence, text}, 아니면 None. 모르면(필드 없음) None."""
+    d = orca_json(["orchestration", "worker-show", "--dispatch", did, "--full"])
+    r = d.get("result") or {} if d.get("ok") else {}
+    aw = (r.get("observation") or {}).get("agentWait")
+    woh = r.get("waitingOnHuman")
+    if not aw and woh not in (True, "yes", "true", "waiting"):
+        return None
+    text = " ".join(_strings(aw)) if aw else ""
+    ev = (aw or {}).get("evidence") if isinstance(aw, dict) else None
+    return {"evidence": str(ev or "waitingOnHuman"), "text": text[:400]}
+
+
+def approval_id(o, did):
+    """확인 창을 알린 escalation의 승인 ID(키 이름에 approval이 든 값). 없으면 None. 메일 꼴은 현장에서 확인할 것."""
+    def walk(x):
+        if isinstance(x, dict):
+            for k_, v in x.items():
+                if re.search(r"approval", str(k_), re.I) and isinstance(v, str) and v:
+                    return v
+                if isinstance(v, (dict, list)):
+                    r_ = walk(v)
+                    if r_:
+                        return r_
+        elif isinstance(x, list):
+            for v in x:
+                r_ = walk(v)
+                if r_:
+                    return r_
+        return None
+    for m in reversed(o.get("escalations") or []):
+        pl = kitlib.msg_payload(m)
+        if pl.get("dispatchId") == did and m.get("handled") is not True:
+            aid = walk(pl)
+            if aid:
+                return aid, " ".join(_strings(pl)) + " " + str(m.get("body") or "")
+    return None, ""
+
+
 def scope_flags(repo, cfg, tasks, n=None):
     """같은 작업의 검토 차단(major·fail)이 이어질 때 → [(작업 ID, 종류, 연속 수, 계열)]. 끝없는 약속을 고치기로 돌지 않게."""
     n = int(n or kitlib.cfg_get(cfg, "review.scope_escalate_after", 2) or 2)
@@ -510,6 +676,28 @@ def stall_lines(s, stale_min):
             lines.append(f"한도 정지 {who}: {win} · {q['key'] or q['agent']} → "
                          + (f"대기 중({routing._hm(wt['resets'])}에 풀리면 재개 메시지)" if wt and wt.get("resets")
                             else "python3 orchestration/tools/quota_switch.py (자동 전환, 곧 풀리면 대기)"))
+        elif w.get("human_wait"):
+            hw = w["human_wait"]
+            lines.append(f"확인 창 대기 {who}: {hw['evidence']}" + (f" \"{hw['text'][:80]}\"" if hw["text"] else "") + " → "
+                         + (RM_REWRITE + (f" · orca orchestration deny --dispatch {w['dispatch']} --prompt {hw['approval']} --reason '<고쳐 쓸 꼴>'"
+                                          if hw.get("approval") else " · 메일함 escalation의 승인 ID로 deny") if hw.get("rm_unsafe")
+                            else "메일함 escalation(승인 ID)으로 approve/deny하거나 사용자에게"))
+        elif w["dispatch"] in (s.get("long_cmds") or {}):
+            lc = s["long_cmds"][w["dispatch"]]
+            lim = kitlib.cfg_get(s.get("_cfg") or {}, "watch.long_cmd_min", 30)
+            lim = float(30 if lim in (None, "") else lim)
+            if lc["age"] >= lim * 60:
+                lines.append(f"긴 명령 {who}: `{lc['cmd'][:70]}` {int(lc['age'] // 60)}분째, 시간 제한 없음 (pid {lc['pid']}) → "
+                             "worker-read로 화면 확인. 멈췄으면 " + (f"`kill -ABRT {lc['abrt']}`(pytest 스택을 남기고 끝난다)" if lc.get("abrt")
+                                                                   else f"`kill -ABRT {lc['pid']}`") + " · 다음부터 run_logged.sh <초>")
+            elif w["last_commit"] and now - max(w["last_commit"], w.get("started") or 0) > stale_min * 60:
+                lines.append(f"커밋 없음 {who}: 마지막 커밋 {ago(w['last_commit'])} · 시험·빌드 {int(lc['age'] // 60)}분째 도는 중 → worker-read로 화면 끝 확인")
+        elif w.get("run") and now - w["run"]["since"] > w["run"]["limit"] + 120:
+            r_ = w["run"]
+            lines.append(f"긴 명령 제한 넘김 {who}: run_logged 제한 {r_['limit'] // 60}분인데 {int((now - r_['since']) // 60)}분째 (pid {r_['pid']}) → "
+                         f"프로세스 확인, 로그 {r_['log']}")
+        elif w.get("run"):
+            pass   # 제한 안에서 도는 시험: 정상
         elif w["attention"]:
             lines.append(f"attention {who}: {', '.join(map(str, w['attention']))} → worker-show/worker-read")
         elif w.get("slot_wait"):
@@ -519,6 +707,12 @@ def stall_lines(s, stale_min):
         elif w["last_commit"] and now - max(w["last_commit"], w.get("started") or 0) > stale_min * 60:
             lines.append(f"커밋 없음 {who}: 마지막 커밋 {ago(w['last_commit'])}"
                          + (f" · 투입 {ago(w['started'])}" if w.get("started") else "") + " → worker-read로 화면 끝 확인")
+    for w in o["workers"]:
+        c_ = w.get("context") or {}
+        if c_.get("over"):
+            lines.append(f"문맥 큼 {w['kit_id'] or w['title'] or '?'} ({w['dispatch']}): 지금 {c_['last'] // 1000}k · 호출 {c_['calls']} "
+                         f"(기준 {int(float(kitlib.cfg_get(s.get('_cfg') or {}, 'status.context_warn_k', 300) or 300))}k) → "
+                         "호출마다 이만큼 다시 읽는다. 끝난 묶음까지 커밋하고 부분 완료로 넘기게 하거나 다음 작업은 더 작게 자른다")
     lines += slot_lines(s)
     sw = s.get("sweep") or {}
     if sw.get("safe"):
@@ -577,7 +771,15 @@ def print_report(s, a):
             mdl = f" · {w['model']}" if w.get("model") else ""
             sl = (f" · 슬롯 대기 '{w['slot_wait']['name']}' {int((time.time() - w['slot_wait']['since']) // 60)}분째" if w.get("slot_wait")
                   else f" · 슬롯 '{w['slot_hold']['name']}' 사용 중 {int((time.time() - w['slot_hold']['since']) // 60)}분" if w.get("slot_hold") else "")
-            print(f"- {w['kit_id'] or w['title'] or '?'} {w['dispatch']} {w['state']}/{w['liveness']}{mdl} · 마지막 커밋 {ago(w['last_commit'])}{sl}{att}")
+            if w.get("run"):
+                sl += f" · 긴 명령 {int((time.time() - w['run']['since']) // 60)}분째(제한 {w['run']['limit'] // 60}분)"
+            elif w["dispatch"] in (s.get("long_cmds") or {}):
+                sl += f" · 긴 명령 {int(s['long_cmds'][w['dispatch']]['age'] // 60)}분째(제한 없음)"
+            if w.get("human_wait"):
+                sl += " · 확인 창 대기"
+            c_ = w.get("context") or {}
+            ctx = f" · 문맥 {c_['last'] // 1000}k·호출 {c_['calls']}" + (" (기준 넘음)" if c_.get("over") else "") if c_ else ""
+            print(f"- {w['kit_id'] or w['title'] or '?'} {w['dispatch']} {w['state']}/{w['liveness']}{mdl} · 마지막 커밋 {ago(w['last_commit'])}{sl}{ctx}{att}")
         md = s.get("models") or {}
         if md.get("error"):
             print(f"## 모델: 라우팅 설정 오류 ({md['error']})")
@@ -612,6 +814,7 @@ def main(argv=None):
     s = collect(repo, cfg, a)
     if a.json:
         s["stall"] = stall_lines(s, a.stale_min)
+        s.pop("_cfg", None)
         print(json.dumps(s, ensure_ascii=False, indent=2, default=str))
     elif a.stall:
         o = s.get("orca") or {"workers": []}

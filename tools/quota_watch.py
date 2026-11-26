@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""한도 점검 예약: 매니저가 자는 동안 생긴 '한도 정지'와 풀린 대기를 놓치지 않게 Orca 예약 실행으로 깨운다.
+"""예약 점검: 매니저가 자는 동안 생긴 '한도 정지'·풀린 대기·멈춤을 놓치지 않게 Orca 예약 실행으로 깨운다.
 
   python3 orchestration/tools/quota_watch.py install [--every 10]   # Orca 예약 실행을 등록한다(이 저장소 작업 폴더)
   python3 orchestration/tools/quota_watch.py status                 # 등록 상태·마지막 알림
@@ -10,6 +10,11 @@
 precheck는 할 일(한도 정지 · 한도가 풀린 대기, quota_switch.py --due와 같은 판정)이 있으면 매니저 Run
 (kit.yaml orca.work_run)에 메일을 보내 매니저를 깨우고, **언제나 1로 끝나** 에이전트를 띄우지 않는다(구독을 쓰지 않는다).
 같은 내용은 remind_minutes(기본 30분)마다 한 번만 다시 알린다. 판단과 전환은 깨어난 매니저가 quota_switch.py로 한다.
+멈춤(kit.yaml watch.stall, 기본 true): 정지 점검의 '커밋 없음'(watch.stale_min, 기본 60분)·'긴 명령'(시간 제한 없이
+watch.long_cmd_min분 넘게)·'긴 명령 제한 넘김'·'확인 창 대기'도 깨운다. 워커는 보고가 와야 매니저를 깨우므로, 끝나지 않는
+명령이나 확인 창에 걸린 워커는 이것 없이는 사람이 물을 때까지 그대로다(현장 3시간 20분).
+빈 변수 의심 rm 확인 창(watch.auto_deny_rm, 기본 true): escalation 메일에서 승인 ID를 찾으면 `orchestration deny`로 한 번
+거절하고 고쳐 쓸 꼴을 이유로 보낸다(워커는 계속한다. Orca는 그 창의 '이번만 거절'만 고른다).
 안전장치: 사전 확인에 부수 효과를 얹는 것은 원래 용도와 다르다. Orca가 이 의미를 바꿔 실행 기록에 에이전트 실행
 (skipped_precheck가 아닌 것)이 생기면, 다음 사전 확인이 예약 실행을 스스로 끄고 매니저에게 알린다(10분마다 에이전트가 뜨지 않게).
 """
@@ -63,8 +68,45 @@ def write_state(repo, d):
     p.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
+WAKE_KINDS = ("긴 명령 제한 넘김", "긴 명령", "확인 창 대기", "커밋 없음")
+
+
+def wake_lines(s, cfg):
+    """정지 점검 줄 중 매니저를 깨울 멈춤 → [(서명, 줄)]. 서명은 종류 + dispatch(분 수가 바뀌어도 같은 알림으로 본다)."""
+    if not kitlib.cfg_get(cfg, "watch.stall", True):
+        return []
+    import re
+    import status
+    out = []
+    for ln in status.stall_lines(s, int(kitlib.cfg_get(cfg, "watch.stale_min", 60) or 60)):
+        kind = next((k for k in WAKE_KINDS if ln.startswith(k + " ")), None)
+        if kind:
+            m = re.search(r"\((ctx_[^)\s]+|[^()\s]+)\)", ln)
+            out.append((f"{kind}:{m.group(1) if m else ln[:40]}", ln))
+    return out
+
+
+def auto_deny(repo, cfg, s, st):
+    """빈 변수 의심 rm 확인 창을 거절한다 → [줄]. 승인 ID를 모르면 손대지 않는다(정지 점검이 deny 명령을 보인다)."""
+    import status
+    if not kitlib.cfg_get(cfg, "watch.auto_deny_rm", True):
+        return []
+    done, out = set(st.get("denied") or []), []
+    for w in (s.get("orca") or {}).get("workers") or []:
+        hw = w.get("human_wait") or {}
+        if not (hw.get("rm_unsafe") and hw.get("approval")) or hw["approval"] in done:
+            continue
+        d = run_json(["orchestration", "deny", "--dispatch", w["dispatch"], "--prompt", hw["approval"], "--reason",
+                      status.RM_REWRITE + ". 고쳐서 다시 부른다."])
+        done.add(hw["approval"])
+        out.append(f"{w.get('kit_id') or w['dispatch']} 빈 변수 의심 rm 확인 창 " + ("거절함(고쳐 쓸 꼴을 보냄)" if d.get("ok")
+                   else f"거절 실패: {(d.get('error') or {}).get('message', '?')}"))
+    st["denied"] = sorted(done)[-200:]
+    return out
+
+
 def pending(repo, cfg):
-    """(한도 정지 목록, 풀린 대기 목록) — quota_switch.py --due와 같은 판정."""
+    """(한도 정지 목록, 풀린 대기 목록, 멈춤 [(서명, 줄)], 현황) — 한도는 quota_switch.py --due와 같은 판정."""
     import argparse as ap_
     import quota_switch
     import status
@@ -72,14 +114,14 @@ def pending(repo, cfg):
     s = status.collect(repo, cfg, ap_.Namespace(no_orca=False))
     o = s.get("orca") or {}
     if o.get("error"):
-        return None, None
+        return [], [], [], s
     stalls = status.quota_stalls(repo, catalog, pol, o.get("workers") or [], quota=routing.read_quota(repo))
     waits = quota_switch.read_waits(repo)
     due = [(d, waits[d]) for d in quota_switch.due_waits(waits, stalls)]
     waiting = {q["dispatch"] for q in stalls if q["dispatch"] in waits}
     filt = [dict(w, windows=[("필터 중단", 100.0, None)]) for w in s.get("turn_stops") or []]
     filt += [dict(w, evidence="오류 중단: errored, 차단 문구 없음 — 확인 필요", windows=[]) for w in s.get("error_stops") or []]
-    return [q for q in stalls if q["dispatch"] not in waiting] + filt, due
+    return [q for q in stalls if q["dispatch"] not in waiting] + filt, due, wake_lines(s, cfg), s
 
 
 def guard(repo, run):
@@ -111,21 +153,33 @@ def cmd_precheck(repo, cfg, a):
         return 1
     if guard(repo, run):
         return 1
-    stalls, due = pending(repo, cfg)
-    if not stalls and not due:
-        return 1
-    sig = sorted([f"stall:{q['dispatch']}" for q in stalls] + [f"due:{d}" for d, _ in due])
+    stalls, due, wake, s = pending(repo, cfg)
     st = read_state(repo)
+    denied = auto_deny(repo, cfg, s, st) if s else []
+    if denied:
+        write_state(repo, st)
+    if not stalls and not due and not wake and not denied:
+        return 1
+    sig = sorted([f"stall:{q['dispatch']}" for q in stalls] + [f"due:{d}" for d, _ in due] + [w for w, _ in wake]
+                 + [f"deny:{x}" for x in denied])
     remind = float(a.remind or REMIND_MIN) * 60
     if st.get("last_sig") == sig and time.time() - float(st.get("last_sent", 0)) < remind:
         return 1
     parts = [f"{q.get('kit_id') or q.get('title') or '?'} " + (f"필터 중단(\"{q.get('evidence', '')[:60]}\")" if q.get("evidence")
              else ", ".join(f"{lab} {u:.0f}%" for lab, u, _ in q["windows"])) for q in stalls]
     parts += [f"{w.get('kit_id') or '?'} 한도 풀림({routing._hm(w['resets'])})" for _, w in due]
-    body = ("예약 점검(quota_watch): " + "; ".join(parts)[:600]
-            + " → python3 orchestration/tools/quota_switch.py (판정·전환·재개). 자세히: status.py --stall")
+    body = "예약 점검(quota_watch): "
+    if parts:
+        body += "; ".join(parts)[:600] + " → python3 orchestration/tools/quota_switch.py (판정·전환·재개). "
+    if wake:
+        body += "멈춤: " + " | ".join(ln for _, ln in wake)[:900] + " "
+    if denied:
+        body += "자동 거절: " + "; ".join(denied)[:300] + " "
+    body += "자세히: status.py --stall"
+    subj = " · ".join(x for x in [f"한도 정지·필터 중단 {len(stalls)}" if stalls else "", f"한도 풀림 {len(due)}" if due else "",
+                                  f"멈춤 {len(wake)}" if wake else "", f"자동 거절 {len(denied)}" if denied else ""] if x)
     d = run_json(["orchestration", "send", "--to", f"run:{run}", "--type", "status",
-                  "--subject", f"한도 점검: 한도 정지·필터 중단 {len(stalls)} · 한도 풀림 {len(due)}", "--body", body])
+                  "--subject", f"예약 점검: {subj}", "--body", body])
     if d.get("ok"):
         st.update(last_sig=sig, last_sent=time.time(), last_body=body)
         write_state(repo, st)

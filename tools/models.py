@@ -147,6 +147,49 @@ def cmd_bench(a):
     return 0
 
 
+def accounts_section(repo, catalog, now):
+    """계정이 둘 이상인 구독: 계정마다 한도(Orca가 지금 읽는 계정이 아니면 마지막으로 읽은 값과 그 나이)와 그 계정에서 도는 세션."""
+    acc = routing.read_accounts(repo)
+    multi = {ag: e for ag, e in acc.items() if len(e.get("accounts") or {}) > 1}
+    if not multi:
+        return
+    ids = set()
+    try:
+        _, tasks = kitlib.all_tasks(repo, kitlib.load_config(repo))
+        ids = set(tasks)
+    except Exception:  # noqa: BLE001
+        pass
+    kid = {r["did"]: r["kit_id"] or r["title"] for r in routing.read_dispatch(repo, ids)}
+    by_acct = {}
+    p = routing.state_dir(repo) / "dispatch_accounts.tsv"
+    if p.is_file():
+        for ln in p.read_text(encoding="utf-8").splitlines():
+            c = ln.split("\t")
+            if len(c) >= 4 and c[3].isdigit() and now - int(c[3]) < 86400:
+                by_acct.setdefault((c[1], c[2]), []).append(kid.get(c[0], c[0]))
+    print("\n# 계정별 (Orca는 고른 계정의 한도만 준다. 다른 계정은 마지막으로 읽은 값)")
+    for ag, e in multi.items():
+        me = routing.session_account(ag)
+        for aid, x in e["accounts"].items():
+            if ag == "codex" and x.get("provider_id") and (not x.get("seen") or now - x["seen"] > 600):
+                try:
+                    import usage
+                    cl = usage.codex_limits(x["provider_id"])
+                except Exception:  # noqa: BLE001
+                    cl = None
+                if cl and cl["seen"] > float(x.get("seen") or 0):
+                    x = dict(x, **cl)
+            who = (["이 세션"] if aid == me else []) + ([f"워커 {', '.join(sorted(set(by_acct[(ag, aid)]))[:6])}(지난 24시간 투입)"]
+                                                        if (ag, aid) in by_acct else [])
+            ws = x.get("windows") or {}
+            val = ", ".join(f"{n} {w['used']:.0f}%" for n, w in sorted(ws.items()) if n in ("session", "weekly", "fableWeekly", "monthly"))
+            age = (f" ({int((now - x['seen']) // 60)}분 전 값)" if (now - x["seen"]) < 7200 else f" ({(now - x['seen']) / 3600:.0f}시간 전 값)") \
+                if x.get("seen") and now - x["seen"] > 600 else ""
+            print(f"- {ag} {aid[:8]}" + (" · 선택됨(새 워커가 쓴다)" if aid == e.get("active") else "") + ": "
+                  + (val + age if val else "읽은 적 없음(이 계정을 고른 동안 models.py quota를 한 번 돌리면 남는다)")
+                  + (f" · {' · '.join(who)}" if who else ""))
+
+
 def cmd_quota(a):
     """구독별 잔여 한도(Orca 집계)와 그것이 라우팅에 주는 영향."""
     repo, cfg, catalog, pol = ctx(a)
@@ -172,6 +215,7 @@ def cmd_quota(a):
         if info.get("alt"):
             line += f" · 다른 계정 {len(info['alt'])}개: " + " / ".join(fmt(x) for x in info["alt"])
         print(line)
+    accounts_section(repo, catalog, now)
     rcat = routing.resolve_catalog(catalog, routing.discover(repo, catalog))
     print("\n# 라우팅 영향")
     for k, m in rcat["models"].items():

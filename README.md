@@ -10,7 +10,7 @@ AI 에이전트 다중 세션으로 소프트웨어를 개발하는 워크플로
 - 단일 HTML 대시보드(오프라인, 작업 보드), 실행 격리 모듈(선택), 검토 단계 모듈(선택)
 - 배포: Claude Code 플러그인 마켓플레이스(자동 업데이트) 또는 심볼릭 링크
 
-버전: **v0.10.1** (2026-11-25) · 라이선스: [Apache-2.0](LICENSE)
+버전: **v0.11.0** (2026-11-26) · 라이선스: [Apache-2.0](LICENSE)
 
 ---
 
@@ -231,6 +231,7 @@ docs/                            VERIFY.md  DESIGN-NOTES.md  LESSONS.md
 
 | 버전 | 일자 | 내용 |
 |---|---|---|
+| v0.11.0 | 2026-11-26 | **시험 토큰과 긴 명령의 멈춤(현장 개선 요청, L-23).** (1) `run_logged.sh <초> <로그> -- <명령>`: 새 프로세스 묶음으로 띄워 그 자리에서 기다리고, 제한에 걸리면 묶음 전체에 SIGABRT(pytest faulthandler 스택이 로그에) → SIGKILL, 끝난 뒤 남은 묶음도 정리. 표준 출력은 종료 코드·걸린 시간·실패한 시험 이름·로그 끝 줄만(시험 한 번 = 호출 한 번). (2) AGENTS.md 셸 명령: 긴 명령은 시간 제한·한 번의 호출, timeout을 쓰면 timeout의 pid를 기다림, 시간 제한 없는 배경 명령을 둔 채 턴을 끝내지 않음, 삭제는 다른 명령과 한 줄에 묶지 않음. (3) 구현 명세: 통과 로그는 마지막 커밋에서 한 번씩, 작업 중엔 자기 폴더 시험만. (4) 검토 명세: 전체 시험은 매니저가 병합 때 한 번, 검토자는 반례·지정 확인만, 증적 삭제 문장 고정. `launch.sh --review` 2회차부터 effort 한 단계 낮춤(`kit.yaml review.recheck_effort_step`). (5) 정지 점검 '긴 명령'(워커 워크트리에서 시간 제한 없이 30분 넘게 도는 시험·빌드, Linux /proc, `kill -ABRT` 대상 pid)·'긴 명령 제한 넘김'·'확인 창 대기'(Orca worker-show, 빈 변수 의심 rm이면 고쳐 쓸 꼴과 deny 명령) → 예약 점검(`quota_watch.py`, 별칭 `stall_watch.py`)이 이것들로도 매니저를 깨우고, 승인 ID를 알면 빈 변수 의심 rm 확인 창을 스스로 거절한다(`kit.yaml watch.*`). (6) `usage.py`: 세션 기록(Claude Code·Codex)에서 작업별 호출 수·호출당 문맥·합계·시험 관련 비중. 현황 워커 줄에 지금 문맥·호출 수, 30만 토큰(`status.context_warn_k`) 넘으면 '문맥 큼'. (7) `models.py quota` 계정별: Orca는 고른 계정의 한도만 주므로 계정마다 마지막 값을 남기고(codex는 세션 기록의 rate_limits로 채움), 이 세션·최근 워커가 어느 계정인지 적는다 |
 | v0.10.1 | 2026-11-25 | **전체 시험 슬롯(현장 피드백).** `slot.sh`가 슬롯이 여러 개일 때 1번 잠금만 기다리던 결함: 이제 `KIT_SLOT_POLL`초(기본 5)마다 모든 슬롯을 다시 보고 먼저 빈 것을 잡는다. 기다리는 동안·잡은 뒤 `<공용 git>/orca-kit/slots/`에 표시 파일(시각·워크트리·명령)을 남기고, `status.py`가 그것으로 워커 줄에 '슬롯 대기 N분째'를 붙이고 정지 점검에 '슬롯 대기'(그 워커의 '커밋 없음' 대신)와 '슬롯 줄'(대기 ≥ 슬롯 수이거나 10분 넘게: 잡은 쪽·대기 수·이 기계 기준 제안 슬롯 수)을 보인다. 설치 때 `slots.test`를 기계의 코어·메모리로 제안한다(코어 4개·메모리 8 GiB당 1, 1~8, `--test-slots`로 지정). 종료코드는 명령 그대로 |
 | v0.10.0 | 2026-11-25 | **워크트리 정리(`worktree_sweep.py`)**: Orca 워크트리가 쌓이는 문제(실사용 저장소 하나에 워커 워크트리 59개). 이 저장소의 Orca 워크트리마다 어느 작업 것인지(Orca 워커 → dispatch.tsv 워크트리 이름 → 브랜치 `req/<ID>`) 찾고 '정리 / 확인 필요 / 남겨 둠'으로 나눈다. **정리**는 잃을 것이 없을 때만: 메인·고정(pin)·자식 있는 워크트리가 아니고, 진행 중 디스패치 없음, 커밋하지 않은 변경 없음, 1시간 넘게 쉼, 그리고 구현은 작업 merged + HEAD가 기준·메인에 들어 있음, 검토는 보고서 폴더가 메인에 들어왔거나 대상 merged, 통합(L1)은 merged + HEAD가 메인에. 지울 때 끝난 워커 터미널 해제 → `orca worktree rm --delete-branch`(워크트리 로컬 브랜치만, `req/*`·`int/*`는 이력이라 둔다) → 정리 훅 → 그 작업의 한도 전환 보존 브랜치. 주인 없는 워크트리는 `--orphans`로만(HEAD가 메인에 다 있을 때). `launch.sh`가 한 시간에 한 번 '정리'만 저절로 한다(`kit.yaml cleanup.auto_sweep`, 기본 true). 정지 점검에 '워크트리 정리 / 확인 필요' 줄. 설정이 없는 저장소는 메인 워크트리의 현재 브랜치(예: master)를 메인으로 본다 |
 | v0.9.1 | 2026-11-25 | **코드 검토 지적 반영.** `cleanup_worker.sh`가 워커 목록을 페이지를 넘겨 전부 읽는다(100개 넘는 Run에서 끝나지 않은 디스패치를 놓치던 것). `hooks/pre-push`가 kit.yaml·PyYAML을 못 읽으면 **막는다**(전에는 빈 설정으로 통과해 보호가 조용히 꺼졌다. 설정 없이 쓰는 저장소는 `KIT_HOOK_NO_CONFIG_OK=1`). `launch.py`가 Orca ID를 JSON으로 읽고(정규식은 대비책), dispatch.tsv·tasks.yaml 쓰기를 파일 잠금(`state/.state.lock`)으로 감싸며(task_status·quota_switch도), task-create 뒤 worker-start가 실패하면 Orca Task를 `failed/cancelled`로 닫는다(고아 Task). `evidence_lint`의 이메일 허용 도메인을 정확히 비교한다(`notexample.com`이 `example.com`으로 통과하던 것). `quota_watch` 안전장치: 예약 실행 기록에 에이전트 실행이 생기면(사전 확인 의미가 바뀜) 스스로 끄고 매니저에게 알린다. `auto_update`는 기본 daily를 유지하고 재현성이 필요한 구간에서 off를 쓰라고 적었다 |

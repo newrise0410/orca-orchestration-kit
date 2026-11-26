@@ -258,6 +258,12 @@ v0.4.1(10장)에서 snap 설치본은 작업 폴더 신뢰 확인 창에 막혔�
 - 시험 165/165(이전 157 + 8): 이메일 도메인(example.com·하위 도메인 통과, notexample.com 걸림), pre-push(설정 못 읽으면 막고 이유 출력, `KIT_HOOK_NO_CONFIG_OK=1`이면 통과), cleanup(둘째 쪽 워커 목록의 진행 중 디스패치로 보류, `--cursor` 호출), launch(JSON `result.task.id`로 Task ID — 출력 속 다른 `task_…` 문자열에 속지 않음, worker-start 실패면 `task-update --status failed --result cancelled`), 쓰기 잠금(두 스레드가 차례로, 잠금 파일은 .gitignore), quota_watch 안전장치(실행 기록에 completed가 있으면 `automations edit --disabled`와 매니저 알림, 사전 확인은 그래도 1).
 - 시험이 잡은 시험 결함: pre-push 시험이 상대 경로로 훅을 불러 `cd` 뒤 파일을 못 찾았고, '막는다' 시험은 그 오류(종료코드 2)로 잘못 통과하고 있었다. 절대 경로로 부르고 막은 이유 문구까지 확인한다.
 
+## 27. v0.11.0: 시험 토큰과 긴 명령의 멈춤 (2026-11-26)
+- 시험 197/197(이전 180 + 17). run_logged: 2초 제한에 걸린 `python3 -X faulthandler` 무한 반복 → rc 124, 로그에 `File "<string>", line 3 in spin` 스택, 요약에 `FAILED tests/test_a.py::test_x`, 셸의 '코어 덤프됨' 알림 없음, 남은 프로세스 없음. 정상 종료는 종료코드 그대로(3), 출력은 로그로만, 배경으로 남긴 자식 프로세스 정리, 실행 표시 파일 정리.
+- 정지 점검: 워커 워크트리에서 도는 `bash -c 'sleep 60; :' fakepytest` → '긴 명령 … 시간 제한 없음 (pid N)'·`kill -ABRT N`, 예약 점검이 '멈춤 1'로 매니저 Run에 알림. 같은 명령을 run_logged로 띄우면 경보 없이 워커 줄에 '긴 명령 0분째(제한 1분)', run_logged를 TERM으로 끄면 묶음도 끝남. 확인 창 대기(가짜 Orca worker-show agentWait, 프롬프트 `rm -f "$EV/$f.raw.log"`) → 고쳐 쓸 꼴과 deny 명령(승인 ID), 예약 점검이 `orchestration deny --dispatch … --prompt apr_1 --reason …`을 한 번만 보낸다. 문맥: 가짜 Claude 세션 기록(호출 2, 마지막 401k) → 워커 줄 '문맥 401k·호출 2 (기준 넘음)', '문맥 큼', usage.py 표 행(호출당 301k, 시험 관련 67%). 검토 2회차 effort high → medium, `--effort`를 주면 그대로. 계정별 한도: 고른 계정은 지금 값, 다른 계정은 마지막 값과 나이, 이 세션 표시.
+- 실데이터: usage.py — 이 키트 세션(호출 521, 호출당 339k, 시험 관련 26%), 실사용 저장소(LIG) 30일 — 매니저 세션 하나가 호출 4480·호출당 379k·1.7G, 구현 세션들 호출당 31만~56만·시험 관련 27~42%(현장 표와 같은 꼴). models.py quota 계정별 — claude 계정 2개 중 고른 계정만 값, codex는 고르지 않은 계정의 값을 세션 기록에서 채움(이 세션의 codex 계정이 Orca가 고른 계정과 달랐다: 현장 7번 제안과 같은 상황).
+- 확인하지 못한 것: 실제 확인 창 escalation 메일의 승인 ID 키 이름(키 이름에 approval이 든 값을 찾는다)과 worker-show `observation.agentWait`의 실제 꼴. 현장에서 처음 걸릴 때 `status.py --json`의 human_wait를 보고 맞춘다. 승인 ID를 못 찾으면 자동 거절은 하지 않고 deny 명령만 보인다. '긴 명령' 프로세스 감시는 Linux만(/proc).
+
 ## 26. v0.10.1: 전체 시험 슬롯 (2026-11-25)
 - 시험 180/180(이전 172 + 8): 슬롯 2개 중 1번 8초·2번 1초 점유 → 기다리는 쪽이 약 1초에 2번을 잡는다(예전 코드는 1번을 기다려 7초 넘게). 종료코드 보존. 다른 워크트리가 슬롯을 잡은 동안 가짜 Orca 워커의 워크트리에서 기다리면 정지 점검이 '슬롯 대기 … 1번째 · 사용 중 1/1'(`--stale-min 0`에서도 '커밋 없음' 아님)과 '슬롯 줄'을, 현황이 워커 줄 '슬롯 대기'와 '## 슬롯' 요약을 보이고, 슬롯이 비면 표시 파일이 지워져 사라진다. 제안값 표(16코어·64 GiB → 4, 4·8 → 1, 16·16 → 2, 상한 8), 설치한 kit.yaml에 제안값과 근거 주석.
 - 실제 기계(24코어·30 GiB)의 제안값은 3. 시험 하나의 메모리를 모르므로 보수적으로 잡았고, 줄이 길 때 정지 점검이 이 값을 같이 보인다.
