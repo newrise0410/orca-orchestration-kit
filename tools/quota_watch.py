@@ -133,7 +133,10 @@ def guard(repo, run):
     d = run_json(["automations", "runs", "--id", aid])
     runs = (d.get("result") or {}).get("runs") or [] if d.get("ok") else []
     since = float(st.get("installed", 0)) * 1000
-    ran = [r for r in runs if not str(r.get("status", "")).startswith("skipped") and float(r.get("scheduledFor") or r.get("startedAt") or 0) >= since]
+    # 실제로 에이전트를 띄운 실행만 센다. 사전 확인이 도는 동안 그 실행 자신은 'dispatching'이다(아직 띄우지 않음) — 그것을 세면 첫 실행에 늘 꺼진다.
+    ran = [r for r in runs if float(r.get("scheduledFor") or r.get("startedAt") or 0) >= since
+           and not str(r.get("status", "")).startswith("skipped")
+           and (r.get("dispatchedAt") or r.get("terminalSessionId") or r.get("chatSessionId"))]
     if not ran:
         return False
     off = run_json(["automations", "edit", "--id", aid, "--disabled"])
