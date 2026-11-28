@@ -442,6 +442,8 @@ if "inbox" in a:
         msgs.append({"id": "msg_perm_1", "type": "escalation", "handled": False, "subject": "Worker is waiting on a permission prompt",
                      "body": "rm -f \"$EV/$f.raw.log\"", "payload": json.dumps({"dispatchId": os.environ.get("FAKE_SW_DID", "ctx_5a1"),
                                                                                   "approvalId": os.environ["FAKE_SW_APPROVAL"]})})
+    if os.path.exists(st + "/done.json"):   # worker_done 메일(advance.py 시험)
+        msgs += json.load(open(st + "/done.json"))
     out({"ok": True, "result": {"messages": msgs}})
 if "worker-stop" in a or "worker-release" in a or a.startswith("orchestration send"): out({"ok": True, "result": {}})
 if a.startswith("automations create"): out({"ok": True, "result": {"automation": {"id": "auto-1", "enabled": True}}})
@@ -451,7 +453,12 @@ if a.startswith("automations runs"):
     st = os.environ.get("FAKE_SW_RUNS", "skipped_precheck")
     out({"ok": True, "result": {"runs": [{"id": "r1", "status": st, "scheduledFor": 9999999999999}]}})
 if "task-create" in a: out({"ok": True, "result": {"id": "task_abc777"}})
-if "worker-start" in a: out({"ok": True, "result": {"dispatchId": "ctx_def777", "state": "ready"}})
+if "worker-start" in a:
+    did = "ctx_def777"
+    if os.environ.get("FAKE_SW_UNIQ"):   # 투입마다 다른 dispatch ID
+        n = int(open(st + "/uniq").read()) + 1 if os.path.exists(st + "/uniq") else 1
+        open(st + "/uniq", "w").write(str(n)); did = f"ctx_u{n:03d}"
+    out({"ok": True, "result": {"dispatchId": did, "state": "ready"}})
 print('{"ok":false}'); sys.exit(1)
 PY
 printf '#!/bin/sh\nexec python3 %s "$@"\n' "$W/fake-orca-sw.py" > "$W/fake-orca-sw"; chmod +x "$W/fake-orca-sw"
@@ -688,6 +695,58 @@ rm -f orchestration/state/quota_cache.json
 o=$(CLAUDECODE=1 CLAUDE_CONFIG_DIR=/x/claude-profiles/aaaaaaaa-1/home FAKE_SW=free FAKE_SW_ACCTS=1 $SW python3 $T/models.py quota 2>&1)
 check "models.py quota: 계정별 — 고른 계정은 지금 값, 다른 계정은 마지막 값과 나이, 이 세션 표시" bash -c 'grep -q "^- claude aaaaaaaa: weekly 77% (60분 전 값) · 이 세션$" <<<"$0" && grep -q "^- claude bbbbbbbb · 선택됨(새 워커가 쓴다): weekly 10%" <<<"$0"' "$o"
 rm -f orchestration/state/quota_accounts.json orchestration/state/quota_cache.json
+# 정해진 전이(advance.py): 구현 통과 → 검토 투입 → 검토 차단 → 실적·보완 투입 → 보완 통과 → 2회차 검토 → 같은 계열 차단 → hold·범위 결정
+cat >> orchestration/tasks.yaml <<'YAML'
+- id: X-AD
+  title: 전이 시험 작업
+  layer: L2
+  module: api
+  branch: req/X-AD
+  base: int/api
+  deps: []
+  write_scope: [api/ad/]
+  acceptance: "api/ad/ 아래 기능을 만든다"
+  status: running
+YAML
+git add -A >/dev/null && git commit -qm "[L0] X-AD" && git branch -f req/X-AD int/api
+printf 'X-AD\ttask_ad\tctx_ad1\tx-ad\t%s\tclaude\tclaude-opus-5-5\thigh\t\t\t\n' "$(date -d '-1 hour' '+%F %T')" >> orchestration/state/dispatch.tsv
+done_msg() {   # done_msg <메일 ID> <dispatch> <본문 첫 줄> [보고서 경로] — worker_done 한 통을 메일함에 더한다(Orca 실제 꼴: payload는 JSON 문자열)
+  python3 - "$W/sw/done.json" "$@" <<'PY'
+import json, os, sys, time
+p, mid, did, first = sys.argv[1:5]; rep = sys.argv[5] if len(sys.argv) > 5 else ""
+ms = json.load(open(p)) if os.path.exists(p) else []
+pl = {"taskId": "task_x", "dispatchId": did, "outcome": "succeeded"}
+if rep: pl["reportPath"] = rep
+ms.append({"id": mid, "type": "worker_done", "handled": True, "createdAt": int(time.time() * 1000), "subject": "done",
+           "body": first + "\n증적: docs/06_evidence/X-AD/report.md · 남은 이슈 없음", "payload": json.dumps(pl)})
+json.dump(ms, open(p, "w"), ensure_ascii=False)
+PY
+}
+AD="env FAKE_SW=free FAKE_SW_UNIQ=1"
+done_msg msg_d1 ctx_ad1 "결과: 통과"
+o=$($AD $SW python3 $T/advance.py --dry-run 2>&1)
+check "advance --dry-run: 할 일만(상태·투입 그대로)" bash -c 'grep -q "^\[자동\] X-AD: 구현 통과 → status review · 검토 투입" <<<"$0" && grep -A12 "id: X-AD" orchestration/tasks.yaml | grep -q "status: running" && test ! -f orchestration/state/advance.json' "$o"
+o=$($AD $SW python3 $T/advance.py 2>&1)
+check "advance: 구현 '결과: 통과' → status review · 검토 투입(dispatch X-AD-RV) · 이력" bash -c 'grep -q "^\[자동\] X-AD: 구현 통과" <<<"$0" && grep -A12 "id: X-AD" orchestration/tasks.yaml | grep -q "status: review" && grep -q "^X-AD-RV	" orchestration/state/dispatch.tsv && grep -q "\"kind\": \"advance:자동\", \"task\": \"X-AD\"" orchestration/state/events.jsonl && grep -q "\"kind\": \"dispatch\", \"task\": \"X-AD\", \"mode\": \"review\"" orchestration/state/events.jsonl' "$o"
+o=$($AD $SW python3 $T/advance.py 2>&1); check "advance: 처리한 메일은 다시 처리하지 않음" has "$o" "새 worker_done 없음"
+rv1=$(awk -F'\t' '$1=="X-AD-RV"{d=$3} END{print d}' orchestration/state/dispatch.tsv)
+mkdir -p "$W/wt-x-sw/docs/06_evidence/X-AD-RV"; printf '# 검토 X-AD\n- H1 영역분리: api/ad가 다른 모듈 상태를 바꾼다(재현: pytest tests/ad)\n' > "$W/wt-x-sw/docs/06_evidence/X-AD-RV/report.md"
+done_msg msg_d2 "$rv1" "판정: 차단 · H 1 · M 2 · 계열: 영역분리" docs/06_evidence/X-AD-RV/report.md
+o=$($AD FAKE_SW_DID=$rv1 $SW python3 $T/advance.py 2>&1)
+check "advance: 검토 '판정: 차단 · 계열' → 실적 major·계열 기록 · 보고서를 지적으로 보완 투입 r1 · status running" bash -c 'grep -q "^\[자동\] X-AD: 검토 차단(계열 영역분리, H 1) → 실적 major 기록 · 보완 투입 --suffix r1" <<<"$0" && grep -q "	X-AD	.*영역분리$" orchestration/state/route_feedback.tsv && grep -q "H1 영역분리" orchestration/specs/X-AD.retry-r1.md && grep -A12 "id: X-AD" orchestration/tasks.yaml | grep -q "status: running"' "$o"
+rt1=$(awk -F'\t' '$1=="X-AD retry-r1"{d=$3} END{print d}' orchestration/state/dispatch.tsv)
+done_msg msg_d3 "$rt1" "결과: 통과"
+o=$($AD $SW python3 $T/advance.py 2>&1)
+check "advance: 보완 통과 → 2회차 검토(--suffix r2)" bash -c 'grep -q "^\[자동\] X-AD: 구현 통과 → status review · 검토 투입 2회차" <<<"$0" && grep -q "^X-AD-RV-r2	" orchestration/state/dispatch.tsv' "$o"
+rv2=$(awk -F'\t' '$1=="X-AD-RV-r2"{d=$3} END{print d}' orchestration/state/dispatch.tsv)
+done_msg msg_d4 "$rv2" "판정: 차단 · H 2 · M 0 · 계열: 영역분리"
+o=$($AD $SW python3 $T/advance.py 2>&1)
+check "advance: 같은 계열 차단 2회 연속 → 보완을 내지 않고 hold · [판단] 범위 결정" bash -c 'grep -q "^\[판단\] X-AD: 범위 결정 필요: 계열 영역분리 2회 연속" <<<"$0" && grep -A14 "id: X-AD" orchestration/tasks.yaml | grep -q "hold: \"범위 결정 필요" && ! grep -q "^X-AD retry-r2" orchestration/state/dispatch.tsv && python3 -c "import yaml;yaml.safe_load(open(\"orchestration/tasks.yaml\"))"' "$o"
+done_msg msg_d5 ctx_nowhere "결과: 통과"
+done_msg msg_d6 "$rv2" "검토를 마쳤다. 자세한 것은 보고서"
+o=$($AD $SW python3 $T/advance.py 2>&1)
+check "advance: 모르는 투입·형식 없는 보고는 [판단]으로(아무것도 바꾸지 않음)" bash -c 'grep -q "^\[판단\] ctx_nowhere: dispatch.tsv에 없는" <<<"$0" && grep -q "^\[건너뜀\] X-AD\|^\[판단\] X-AD" <<<"$0"' "$o"
+rm -f "$W/sw/done.json"
 unset FAKE_SW_DID FAKE_SW_TITLE
 $M cooldown claude --min 1440 --reason 'Orca에서 꺼진 에이전트' >/dev/null   # 위에서 푼 쿨다운을 되돌린다(뒤 대시보드 시험이 쓴다)
 cp "$W/models.yaml.pre-sw" orchestration/models.yaml; cp "$W/kit.yaml.pre-sw" orchestration/kit.yaml

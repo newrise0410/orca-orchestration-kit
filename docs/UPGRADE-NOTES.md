@@ -6,7 +6,7 @@
 적용 절차는 `skills/orca-orchestration-kit/references/upgrade.md`(적용 직전·끝에 매니저에게 알리고, 키트가 바꾼 경로만 커밋).
 아래는 매니저가 **한 번만 다시 익히면 되게** 묶음마다 바뀐 운영을 모은 것이다.
 
-## 다음 묶음: v0.8.4 → v0.11.0 (v0.8.5 · v0.9.0 · v0.9.1 · v0.10.0 · v0.10.1 · v0.11.0)
+## 다음 묶음: v0.8.4 → v0.12.0 (v0.8.5 · v0.9.0 · v0.9.1 · v0.10.0 · v0.10.1 · v0.11.0 · v0.12.0)
 
 ### 매니저가 새로 할 일
 1. **투입 전에 약속을 닫는다.** L1·L2 작업에 `guarantees`(보장하는 것)와 `out_of_scope`(범위 밖)를 적고 낸다. `validate_dag.py`가 빠진 작업과 '언제나·모든·완전히' 같은 열린 약속을 경고한다. 이미 돌고 있는 작업은 다음 차수(보완·이어받기)를 낼 때 적는다.
@@ -18,7 +18,8 @@
 7. **긴 명령은 `run_logged.sh`로(v0.11.0).** 병합 관문의 빌드·전체 시험·스모크를 `orchestration/tools/run_logged.sh <초> <로그> -- …`로 돌린다(전에 손으로 쓰던 step() 대신). 워커·검토자 규칙은 AGENTS.md와 명세가 바뀌어 새 투입부터 따른다. 이미 도는 워커에는 필요하면 `send`로 한 줄 알린다.
 8. **예약 점검을 켠다/다시 깐다(v0.11.0).** `quota_watch.py install`(= `stall_watch.py`)이 이제 한도 말고 '커밋 없음'(60분)·'긴 명령'(시간 제한 없이 30분)·'확인 창 대기'로도 매니저를 깨우고, 빈 변수 의심 rm 확인 창은 승인 ID를 찾으면 스스로 거절한다. 이미 깔았으면 그대로 새 판정이 적용된다. 처음 '확인 창 대기'가 걸리면 `status.py --json`의 `human_wait`(승인 ID를 찾았는지)를 키트에 알려 준다.
 9. **작업 크기를 문맥으로 본다(v0.11.0).** 현황 워커 줄의 '문맥 Nk·호출 M', 정지 점검 '문맥 큼'(30만 토큰). 작업별 실측은 `usage.py --since 6h`(지표 문서의 작업별 행).
-10. **기록 커밋은 경로를 지정해 담는다**(`git add -- <파일>`, `git add -A`·`orchestration/` 통째 금지). 키트 적용 중 커밋 섞임(v0.8.5, L-21).
+10. **worker_done이 오면 먼저 `advance.py`(v0.12.0).** 처음에는 `--dry-run`으로 몇 번 보고 맞으면 그냥 돌린다. `[자동]`은 손으로 다시 하지 않고 `[판단]`만 처리한다. 새 명세부터 워커 보고 첫 줄이 `결과: …` / `판정: … · 계열: …`로 고정되므로, 적용 전에 낸 워커의 보고는 `[판단]`으로 나온다(예전처럼 손으로). 검토 없이 가는 작업은 tasks.yaml에 `review: false`.
+11. **기록 커밋은 경로를 지정해 담는다**(`git add -- <파일>`, `git add -A`·`orchestration/` 통째 금지). 키트 적용 중 커밋 섞임(v0.8.5, L-21).
 
 ### 저절로 바뀌는 것
 - escalation 메일을 `--full`로 읽어 필터 중단(codex 안전 필터)을 메일 Last output에서 잡는다. 한도 메일(quota reached·Resets in)은 필터·오류 중단으로 잡지 않는다(v0.8.5).
@@ -39,4 +40,5 @@
 - `python3 orchestration/tools/validate_dag.py` — 투입 전 작업의 guarantees 경고 목록
 - `python3 orchestration/tools/status.py --stall` — 범위 결정 필요·검토 반복, 필터 중단(메일), 긴 명령·확인 창 대기·문맥 큼
 - `orchestration/tools/run_logged.sh 5 /tmp/t.log -- sleep 10` — rc 124와 요약 한 덩어리가 나오면 된다
-- 커밋: `[L0] orchestration kit v0.11.0 upgrade`(apply 출력의 경로만)
+- `python3 orchestration/tools/advance.py --dry-run` — 지난 24시간 worker_done이 어떻게 처리될지(이미 진행된 것은 건너뜀)
+- 커밋: `[L0] orchestration kit v0.12.0 upgrade`(apply 출력의 경로만)

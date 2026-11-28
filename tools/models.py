@@ -350,6 +350,7 @@ def cmd_feedback(a):
     with open(p, "a", encoding="utf-8") as f:
         f.write("\t".join([dt.datetime.now().strftime("%F %T"), a.id, str(VERDICT[a.verdict]), (a.note or "").replace("\t", " "),
                            (a.category or "").replace("\t", " ").strip()]) + "\n")
+    kitlib.log_event(repo, "feedback", a.id, verdict=a.verdict, category=(a.category or "").strip(), note=a.note or "")
     print(f"{a.id}: {a.verdict} ({VERDICT[a.verdict]})" + (f" · 계열 {a.category}" if a.category else "") + " 기록 → 마지막 구현 투입의 실적에 반영")
     return 0
 

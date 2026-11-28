@@ -311,6 +311,8 @@ def main(argv=None):
         with kitlib.locked(repo), open(routing.state_dir(repo) / "quota_switch.tsv", "a", encoding="utf-8") as f:
             f.write("\t".join([dt.datetime.now().strftime("%F %T"), tid, q["dispatch"], q["agent"], q["key"], reason.replace("\t", " "),
                                snap["branch"], suffix, "filter" if filt else "quota"]) + "\n")
+        kitlib.log_event(repo, "switch", tid, did=q["dispatch"], agent=q["agent"], key=q["key"], stop="filter" if filt else "quota",
+                         reason=reason, wip=snap["branch"], suffix=suffix)
         # 고른 구독을 그대로 넘긴다(kit.yaml review.agent 같은 고정이 한도 찬 구독을 다시 고르지 않게)
         pick = ["--agent", dec["agent"]] + (["--model", str(dec["model"])] if dec.get("model") else []) \
             + (["--effort", str(dec["effort"])] if dec.get("effort") else [])
