@@ -6,7 +6,7 @@
 적용 절차는 `skills/orca-orchestration-kit/references/upgrade.md`(적용 직전·끝에 매니저에게 알리고, 키트가 바꾼 경로만 커밋).
 아래는 매니저가 **한 번만 다시 익히면 되게** 묶음마다 바뀐 운영을 모은 것이다.
 
-## 다음 묶음: v0.8.4 → v0.12.2 (v0.8.5 · v0.9.0 · v0.9.1 · v0.10.0 · v0.10.1 · v0.11.0 · v0.12.0 · v0.12.1 · v0.12.2)
+## 다음 묶음: v0.8.4 → v0.12.3 (v0.8.5 · v0.9.0 · v0.9.1 · v0.10.0 · v0.10.1 · v0.11.0 · v0.12.0 · v0.12.1 · v0.12.2 · v0.12.3)
 
 ### 매니저가 새로 할 일
 1. **투입 전에 약속을 닫는다.** L1·L2 작업에 `guarantees`(보장하는 것)와 `out_of_scope`(범위 밖)를 적고 낸다. `validate_dag.py`가 빠진 작업과 '언제나·모든·완전히' 같은 열린 약속을 경고한다. 이미 돌고 있는 작업은 다음 차수(보완·이어받기)를 낼 때 적는다.
@@ -44,4 +44,4 @@
 - `python3 orchestration/tools/advance.py --dry-run` — 지난 24시간 worker_done이 어떻게 처리될지(이미 진행된 것은 건너뜀)
 - `python3 orchestration/tools/metrics.py --since 14d` — 처리 시간·겹침 배수·재작업 절이 나오면 된다
 - `orca automations runs --id <예약 ID>` — 설치 뒤 첫 실행이 `skipped_precheck`이고 예약이 켜져 있으면 된다(v0.12.2 전에는 첫 실행에 스스로 꺼졌다)
-- 커밋: `[L0] orchestration kit v0.12.2 upgrade`(apply 출력의 경로만)
+- 커밋: `[L0] orchestration kit v0.12.3 upgrade`(apply 출력의 경로만)

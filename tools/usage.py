@@ -12,7 +12,8 @@
 읽는 곳
 - Claude Code: <설정 폴더>/projects/<워크트리 경로의 영숫자 아닌 글자를 '-'로>/*.jsonl
   설정 폴더 = ~/.claude, $CLAUDE_CONFIG_DIR, Orca 계정 폴더(~/.config/orca/claude-profiles/*/home)
-- Codex: ~/.codex/sessions/**/rollout-*.jsonl (첫 줄 session_meta의 cwd로 워크트리를 맞춘다)
+- Codex: ~/.codex/sessions, $CODEX_HOME/sessions, Orca codex 계정 폴더(~/.config/orca/codex-accounts/*/home/sessions)의 rollout-*.jsonl
+  (첫 줄 session_meta의 cwd로 워크트리를 맞춘다)
 - KIT_TRANSCRIPT_DIRS(콜론 구분)를 주면 Claude 설정 폴더 목록을 그것으로 바꾼다(시험용).
 """
 import argparse
@@ -46,9 +47,27 @@ def claude_homes():
     return out
 
 
-def codex_root():
+def codex_roots():
+    """codex 세션 기록 폴더들. Orca 안의 세션은 CODEX_HOME이 계정 폴더(codex-accounts/<id>/home)를 가리키지만
+    Orca가 띄운 codex 워커의 기록은 ~/.codex/sessions에 남을 수 있다 → 있는 곳을 모두 본다(같은 파일은 한 번)."""
     env = os.environ.get("KIT_CODEX_SESSIONS")
-    return Path(env) if env else Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "sessions"
+    if env:
+        return [Path(x) for x in env.split(":") if x]
+    cand = [Path.home() / ".codex" / "sessions"]
+    if os.environ.get("CODEX_HOME"):
+        cand.append(Path(os.environ["CODEX_HOME"]) / "sessions")
+    cand += [Path(p) for p in sorted(glob.glob(str(Path.home() / ".config/orca/codex-accounts/*/home/sessions")))]
+    out, seen = [], set()
+    for c in cand:
+        r = os.path.realpath(c)
+        if r not in seen and c.is_dir():
+            seen.add(r)
+            out.append(c)
+    return out
+
+
+def codex_files():
+    return [f for r in codex_roots() for f in glob.glob(str(r / "*/*/*/rollout-*.jsonl"))]
 
 
 def slug(path):
@@ -66,9 +85,8 @@ def session_files(worktree, since=0):
         for f in glob.glob(str(h / "projects" / slug(wt) / "*.jsonl")):
             if os.path.getmtime(f) >= since and os.path.realpath(f) not in {os.path.realpath(x) for _, x in out}:
                 out.append(("claude", f))
-    root = codex_root()
-    if root.is_dir():
-        for f in glob.glob(str(root / "*/*/*/rollout-*.jsonl")):
+    if True:
+        for f in codex_files():
             try:
                 if os.path.getmtime(f) < since:
                     continue
@@ -167,10 +185,9 @@ def latest(worktree, since=0):
 def codex_limits(provider_id, max_files=300):
     """codex 세션 기록(token_count 이벤트의 rate_limits)에서 그 계정의 마지막 한도 → {windows, seen} | None.
     Orca는 고른 계정의 한도만 주므로, 고르지 않은 codex 계정은 이것으로 채운다(session_meta.creator_account_id로 계정을 맞춘다)."""
-    root = codex_root()
-    if not provider_id or not root.is_dir():
+    if not provider_id:
         return None
-    fs = sorted(glob.glob(str(root / "*/*/*/rollout-*.jsonl")), key=os.path.getmtime, reverse=True)[:max_files]
+    fs = sorted(codex_files(), key=os.path.getmtime, reverse=True)[:max_files]
     for f in fs:
         try:
             with open(f, encoding="utf-8", errors="ignore") as fh:
