@@ -227,7 +227,8 @@ def main(argv=None):
                             note("자동", tid, f"검토 차단(계열 {', '.join(cats)}, H {p['h'] if p['h'] is not None else '?'}) → 실적 major 기록 · 보완 투입 --suffix {sfx}",
                                  message=mid, did=did, category=cats[0], suffix=sfx)
                         else:
-                            note("판단", tid, f"보완 투입 실패 → {o.splitlines()[-1] if o else '?'}", message=mid, did=did)
+                            note("판단", tid, f"보완 투입 실패(실적 major는 기록됨, status review 그대로) → failedStage 확인 뒤 "
+                                 f"tools/launch.sh --retry {nf.relative_to(repo)} --suffix {sfx} {tid}: {o.splitlines()[-1] if o else '?'}", message=mid, did=did)
             else:
                 note("판단", tid, "검토 보고에 '판정: 통과|차단'이 없다 → 보고서를 직접 본다", message=mid, did=did)
             mark()
@@ -243,14 +244,23 @@ def main(argv=None):
             else:
                 prior = sum(1 for x in rows if x["kit_id"] == tid and x["mode"] == "review")
                 args = [str(T / "launch.sh"), "--review"] + (["--suffix", next_suffix(rows, tid, "review", repo, "review")] if prior else []) + [tid]
-                if not a.dry_run:
+                rc, o = run_tool(args, a.dry_run)
+                # status는 투입이 된 뒤에 바꾼다. launch가 실패로 끝나도 dispatch.tsv에 줄이 생겼으면 검토 워커는 떴다.
+                # 실패면 status는 그대로(running) — 메일은 처리한 것으로 두고 다시 자동 투입하지 않는다(launch: 다시 실행 전에 failedStage 확인).
+                dids = {x["did"] for x in rows}
+                fresh = [x for x in routing.read_dispatch(repo, set(tasks)) if x["kit_id"] == tid and x["mode"] == "review" and x["did"] not in dids]
+                if not a.dry_run and (rc == 0 or fresh):
                     with kitlib.locked(repo):
                         tpath.write_text(task_status.set_status(tpath.read_text(encoding="utf-8"), tid, "review"), encoding="utf-8")
-                rc, o = run_tool(args, a.dry_run)
+                why = o.splitlines()[-1] if o else "?"
                 if rc == 0:
                     note("자동", tid, f"구현 통과 → status review · 검토 투입" + (f" {prior + 1}회차" if prior else ""), message=mid, did=did)
+                elif fresh:
+                    note("판단", tid, f"구현 통과 → 검토 워커({fresh[-1]['did']})는 떴지만 launch가 실패로 끝났다(status review) → 워커 상태 확인: {why}",
+                         message=mid, did=did)
                 else:
-                    note("판단", tid, f"구현 통과 → status review로 바꿨지만 검토 투입 실패 → {o.splitlines()[-1] if o else '?'}", message=mid, did=did)
+                    note("판단", tid, f"구현 통과 → 검토 투입 실패, status는 {stat} 그대로 → failedStage 확인 뒤 {' '.join(['tools/launch.sh'] + args[1:])}: {why}",
+                         message=mid, did=did)
         elif p["result"] == "부분":
             note("판단", tid, "부분 완료 → 보고의 남은 목록으로 다음 차수(<ID>a/b)를 낸다", message=mid, did=did)
         else:

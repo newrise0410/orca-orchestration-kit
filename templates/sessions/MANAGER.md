@@ -56,6 +56,7 @@
 | **worker_done이 오면 먼저** | `python3 orchestration/tools/advance.py` — 정해진 전이(구현 통과 → 검토 투입, 검토 차단 → 실적·보완 투입, 같은 계열 2회 → hold)는 도구가 하고 `[판단]` 줄만 남긴다. `--dry-run`으로 미리 본다 |
 | 긴 명령(시간 제한·한 번의 호출) | `orchestration/tools/run_logged.sh <초> <로그> -- <명령>` (병합 확인의 빌드·전체 시험·스모크도) |
 | 작업별 토큰(호출 수 × 문맥) | `python3 orchestration/tools/usage.py --since 6h` (지표 문서의 작업별 행) |
+| 효과 지표(처리 시간·겹침·재작업·복구·자동 전이) | `python3 orchestration/tools/metrics.py --since 7d [--tokens]` (이정표마다 지표 문서에) |
 | 전체 시험 동시 수 제한 | `orchestration/tools/slot.sh test -- <시험 명령>` (줄은 status.py의 '슬롯 대기'·'슬롯 줄', 수는 kit.yaml `slots.test`) |
 
 ## 3. 운영 규칙
