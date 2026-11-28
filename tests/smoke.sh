@@ -454,6 +454,8 @@ if a.startswith("automations runs"):
     out({"ok": True, "result": {"runs": [{"id": "r1", "status": st, "scheduledFor": 9999999999999}]}})
 if "task-create" in a: out({"ok": True, "result": {"id": "task_abc777"}})
 if "worker-start" in a:
+    if os.environ.get("FAKE_SW_START_FAIL"):
+        print(json.dumps({"ok": False, "error": {"code": "worker_start_failed", "message": "failedStage spawn"}})); sys.exit(1)
     did = "ctx_def777"
     if os.environ.get("FAKE_SW_UNIQ"):   # 투입마다 다른 dispatch ID
         n = int(open(st + "/uniq").read()) + 1 if os.path.exists(st + "/uniq") else 1
@@ -723,9 +725,12 @@ json.dump(ms, open(p, "w"), ensure_ascii=False)
 PY
 }
 AD="env FAKE_SW=free FAKE_SW_UNIQ=1"
+done_msg msg_d0 ctx_ad1 "결과: 통과"
+o=$($AD FAKE_SW_START_FAIL=1 $SW python3 $T/advance.py --message msg_d0 2>&1)
+check "advance: 검토 투입이 실패하면 status는 running 그대로 · 다시 낼 명령을 [판단]으로" bash -c 'grep -q "^\[판단\] X-AD: 구현 통과 → 검토 투입 실패, status는 running 그대로 → failedStage 확인 뒤 tools/launch.sh --review X-AD" <<<"$0" && grep -A12 "id: X-AD" orchestration/tasks.yaml | grep -q "status: running" && ! grep -q "^X-AD-RV	" orchestration/state/dispatch.tsv' "$o"
 done_msg msg_d1 ctx_ad1 "결과: 통과"
 o=$($AD $SW python3 $T/advance.py --dry-run 2>&1)
-check "advance --dry-run: 할 일만(상태·투입 그대로)" bash -c 'grep -q "^\[자동\] X-AD: 구현 통과 → status review · 검토 투입" <<<"$0" && grep -A12 "id: X-AD" orchestration/tasks.yaml | grep -q "status: running" && test ! -f orchestration/state/advance.json' "$o"
+check "advance --dry-run: 할 일만(상태·투입 그대로)" bash -c 'grep -q "^\[자동\] X-AD: 구현 통과 → status review · 검토 투입" <<<"$0" && grep -A12 "id: X-AD" orchestration/tasks.yaml | grep -q "status: running" && ! grep -q msg_d1 orchestration/state/advance.json' "$o"
 o=$($AD $SW python3 $T/advance.py 2>&1)
 check "advance: 구현 '결과: 통과' → status review · 검토 투입(dispatch X-AD-RV) · 이력" bash -c 'grep -q "^\[자동\] X-AD: 구현 통과" <<<"$0" && grep -A12 "id: X-AD" orchestration/tasks.yaml | grep -q "status: review" && grep -q "^X-AD-RV	" orchestration/state/dispatch.tsv && grep -q "\"kind\": \"advance:자동\", \"task\": \"X-AD\"" orchestration/state/events.jsonl && grep -q "\"kind\": \"dispatch\", \"task\": \"X-AD\", \"mode\": \"review\"" orchestration/state/events.jsonl' "$o"
 o=$($AD $SW python3 $T/advance.py 2>&1); check "advance: 처리한 메일은 다시 처리하지 않음" has "$o" "새 worker_done 없음"
@@ -747,6 +752,20 @@ done_msg msg_d6 "$rv2" "검토를 마쳤다. 자세한 것은 보고서"
 o=$($AD $SW python3 $T/advance.py 2>&1)
 check "advance: 모르는 투입·형식 없는 보고는 [판단]으로(아무것도 바꾸지 않음)" bash -c 'grep -q "^\[판단\] ctx_nowhere: dispatch.tsv에 없는" <<<"$0" && grep -q "^\[건너뜀\] X-AD\|^\[판단\] X-AD" <<<"$0"' "$o"
 rm -f "$W/sw/done.json"
+# 효과 지표(metrics.py): 키트 기록만으로 처리 시간·재작업·복구·자동 전이
+git update-ref refs/heads/req/X-AD "$(git commit-tree -p req/X-AD -m "[X-AD] 구현" 'req/X-AD^{tree}')"
+git update-ref refs/heads/int/api "$(git commit-tree -p int/api -p req/X-AD -m "[G] Merge req/X-AD(전이 시험) → int/api" 'req/X-AD^{tree}')"
+o=$(python3 $T/metrics.py --since 3650d --json 2>&1)
+check "metrics: X-AD — 'Merge req/X-AD(…' 병합 시각 · 보완 1 · 검토 2 · 자동 전이 수 · 이어받기(X-SW)" python3 -c '
+import json, sys
+m = json.loads(sys.argv[1]); x = m["per_task"]["X-AD"]
+assert x["end"] and x["lead_h"] is not None and not x["approx"], x
+assert x["retry"] == 1 and x["review"] == 2, x
+assert m["advance"].get("자동", 0) >= 3 and m["advance"].get("판단", 0) >= 1, m["advance"]
+assert m["recovery"]["tasks"] >= 1 and "X-SW" in [k for k, v in m["per_task"].items() if v["recovered"]], m["recovery"]
+' "$o"
+o=$(python3 $T/metrics.py --since 3650d 2>&1)
+check "metrics: 표 — 처리 시간·겹침 배수·재작업·복구·자동 전이 절" bash -c 'for h in "## 처리 시간" "겹침 배수" "## 재작업" "## 복구" "## 자동 전이(advance)" "DESIGN-NOTES.md 13장"; do grep -qF "$h" <<<"$0" || exit 1; done' "$o"
 unset FAKE_SW_DID FAKE_SW_TITLE
 $M cooldown claude --min 1440 --reason 'Orca에서 꺼진 에이전트' >/dev/null   # 위에서 푼 쿨다운을 되돌린다(뒤 대시보드 시험이 쓴다)
 cp "$W/models.yaml.pre-sw" orchestration/models.yaml; cp "$W/kit.yaml.pre-sw" orchestration/kit.yaml

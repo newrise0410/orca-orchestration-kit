@@ -6,7 +6,7 @@
 적용 절차는 `skills/orca-orchestration-kit/references/upgrade.md`(적용 직전·끝에 매니저에게 알리고, 키트가 바꾼 경로만 커밋).
 아래는 매니저가 **한 번만 다시 익히면 되게** 묶음마다 바뀐 운영을 모은 것이다.
 
-## 다음 묶음: v0.8.4 → v0.12.0 (v0.8.5 · v0.9.0 · v0.9.1 · v0.10.0 · v0.10.1 · v0.11.0 · v0.12.0)
+## 다음 묶음: v0.8.4 → v0.12.1 (v0.8.5 · v0.9.0 · v0.9.1 · v0.10.0 · v0.10.1 · v0.11.0 · v0.12.0 · v0.12.1)
 
 ### 매니저가 새로 할 일
 1. **투입 전에 약속을 닫는다.** L1·L2 작업에 `guarantees`(보장하는 것)와 `out_of_scope`(범위 밖)를 적고 낸다. `validate_dag.py`가 빠진 작업과 '언제나·모든·완전히' 같은 열린 약속을 경고한다. 이미 돌고 있는 작업은 다음 차수(보완·이어받기)를 낼 때 적는다.
@@ -20,6 +20,7 @@
 9. **작업 크기를 문맥으로 본다(v0.11.0).** 현황 워커 줄의 '문맥 Nk·호출 M', 정지 점검 '문맥 큼'(30만 토큰). 작업별 실측은 `usage.py --since 6h`(지표 문서의 작업별 행).
 10. **worker_done이 오면 먼저 `advance.py`(v0.12.0).** 처음에는 `--dry-run`으로 몇 번 보고 맞으면 그냥 돌린다. `[자동]`은 손으로 다시 하지 않고 `[판단]`만 처리한다. 새 명세부터 워커 보고 첫 줄이 `결과: …` / `판정: … · 계열: …`로 고정되므로, 적용 전에 낸 워커의 보고는 `[판단]`으로 나온다(예전처럼 손으로). 검토 없이 가는 작업은 tasks.yaml에 `review: false`.
 11. **기록 커밋은 경로를 지정해 담는다**(`git add -- <파일>`, `git add -A`·`orchestration/` 통째 금지). 키트 적용 중 커밋 섞임(v0.8.5, L-21).
+12. **적용 전후로 `metrics.py`를 한 번씩(v0.12.1).** 적용 직전 `metrics.py --since 14d --tokens` 출력을 지표 문서에 남기고, 2주 뒤 다시 돌려 비교한다(처리 시간·매니저 토큰·[판단] 수). 예전 기록은 보완을 새 ID로 냈으면 재작업이 0으로 나온다(측정 공백).
 
 ### 저절로 바뀌는 것
 - escalation 메일을 `--full`로 읽어 필터 중단(codex 안전 필터)을 메일 Last output에서 잡는다. 한도 메일(quota reached·Resets in)은 필터·오류 중단으로 잡지 않는다(v0.8.5).
@@ -41,4 +42,5 @@
 - `python3 orchestration/tools/status.py --stall` — 범위 결정 필요·검토 반복, 필터 중단(메일), 긴 명령·확인 창 대기·문맥 큼
 - `orchestration/tools/run_logged.sh 5 /tmp/t.log -- sleep 10` — rc 124와 요약 한 덩어리가 나오면 된다
 - `python3 orchestration/tools/advance.py --dry-run` — 지난 24시간 worker_done이 어떻게 처리될지(이미 진행된 것은 건너뜀)
-- 커밋: `[L0] orchestration kit v0.12.0 upgrade`(apply 출력의 경로만)
+- `python3 orchestration/tools/metrics.py --since 14d` — 처리 시간·겹침 배수·재작업 절이 나오면 된다
+- 커밋: `[L0] orchestration kit v0.12.1 upgrade`(apply 출력의 경로만)

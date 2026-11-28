@@ -258,6 +258,11 @@ v0.4.1(10장)에서 snap 설치본은 작업 폴더 신뢰 확인 창에 막혔�
 - 시험 165/165(이전 157 + 8): 이메일 도메인(example.com·하위 도메인 통과, notexample.com 걸림), pre-push(설정 못 읽으면 막고 이유 출력, `KIT_HOOK_NO_CONFIG_OK=1`이면 통과), cleanup(둘째 쪽 워커 목록의 진행 중 디스패치로 보류, `--cursor` 호출), launch(JSON `result.task.id`로 Task ID — 출력 속 다른 `task_…` 문자열에 속지 않음, worker-start 실패면 `task-update --status failed --result cancelled`), 쓰기 잠금(두 스레드가 차례로, 잠금 파일은 .gitignore), quota_watch 안전장치(실행 기록에 completed가 있으면 `automations edit --disabled`와 매니저 알림, 사전 확인은 그래도 1).
 - 시험이 잡은 시험 결함: pre-push 시험이 상대 경로로 훅을 불러 `cd` 뒤 파일을 못 찾았고, '막는다' 시험은 그 오류(종료코드 2)로 잘못 통과하고 있었다. 절대 경로로 부르고 막은 이유 문구까지 확인한다.
 
+## 29. v0.12.1: 효과 지표와 전이 실패 처리 (2026-11-28)
+- 시험 207/207(이전 204 + 3): 가짜 Orca의 worker-start 실패 → advance가 status를 running 그대로 두고 `[판단]`에 `tools/launch.sh --review X-AD`를 적는다(검토 dispatch 없음). metrics: 'Merge req/X-AD(전이 시험) → int/api' 병합 커밋에서 처리 시간, 보완 1·검토 2·판정 major 2, advance [자동] 3·[판단] 4, X-SW 이어받기 7회, 표의 절 제목.
+- 실데이터(LIG, 지난 60일, 작업 105개): 처리 시간 중앙값 0.8시간·p90 6.4시간(94개, 그중 52개는 병합 커밋이 없어 마지막 `[ID]` 커밋으로 어림, L1·게이트 3개 뺌), 겹침 배수 3.54(작업 기간 합 232시간 ÷ 열려 있던 66시간), 토큰 합계 6.7G·시험 관련 30%·병합 작업당 중앙값 19M. 처음 판은 병합 커밋 제목 `req/R-SWDS-SFR-009(보완…`과 `Merge L0-BOM12 …`를 놓쳐 76개가 비었고, 병합 시각을 모르는 작업을 '지금까지 열림'으로 세어 겹침 배수가 70이 나왔다 → 고쳤다.
+- 한계: LIG는 예전 기록 꼴이라 보완을 새 ID(`S-03c`)·별도 검토 작업(`REV-*`)으로 냈다 → '보완 없이 병합 100%'는 측정 공백이지 품질이 아니다. 이어받기 기록(quota_switch.tsv)도 없었다. v0.12 이후 기록(retry·review 투입, events.jsonl)부터 재작업·자동 전이가 제대로 잡힌다.
+
 ## 28. v0.12.0: 정해진 전이 (2026-11-28)
 - 시험 204/204(이전 197 + 7): 가짜 Orca 메일함의 worker_done(payload는 JSON 문자열, Orca 실제 꼴)으로 한 작업의 사슬을 끝까지 돌렸다 — `--dry-run`은 상태·투입 그대로, 구현 `결과: 통과` → status review·검토 투입(dispatch `X-AD-RV`)·이력(advance·dispatch 이벤트), 같은 메일 다시 처리 안 함, 검토 `판정: 차단 · H 1 · M 2 · 계열: 영역분리` → route_feedback에 major·계열, 검토 워커 워크트리의 보고서가 보완 명세(`X-AD.retry-r1.md`)에 들어감, status running, 보완 통과 → 2회차 검토(`X-AD-RV-r2`), 같은 계열 두 번째 차단 → 보완을 내지 않고 hold(YAML 유효) + `[판단] 범위 결정 필요`, 모르는 dispatch·형식 없는 보고는 `[판단]`. 한도 전환 기록에 이벤트를 더하다 낸 인자 충돌(kind 두 번)은 기존 한도 전환 시험 6개가 잡았다.
 - 확인하지 못한 것: 실제 Orca worker_done 메일의 payload 키(`outcome`·`reportPath`)와 `createdAt` 이름. 없으면 본문 첫 줄과 기본 증적 경로로 동작하고, 시각을 모르면 나이 검사를 건너뛴다(기대 상태·뒤따른 투입 검사는 그대로).
