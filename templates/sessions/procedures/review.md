@@ -9,6 +9,7 @@
 - 다음 검토에는 지난 지적의 해소 판정 표를 요구한다. 검토 범위·항목은 명세(acceptance 또는 `specs/<ID>.review.extra.md`)에 처음부터 넣는다.
 
 ## 2. 반영
+- **먼저 `advance.py`.** 검토 worker_done의 첫 줄(`판정: 차단 · H n · M n · 계열: …`)로 실적 기록과 보완 투입(같은 계열 연속이면 hold)을 도구가 한다. 아래는 도구가 `[판단]`으로 남긴 것(통과 → 병합 관문, 형식 없음, 범위 결정)과 손으로 할 때의 절차다.
 - **보고서는 경로만 가져온다:** `git checkout {{REF}}req/<검토ID> -- docs/06_evidence/<검토ID>/` → `[G]` 커밋.
 - 브랜치를 머지해야 하면 `merge-gate.md` 2의 범위 확인(허용 경로 `docs/06_evidence/<검토ID>/`)을 통과할 때만 한다.
 - **판정을 모델 실적에 남긴다:** `python3 orchestration/tools/models.py feedback <ID> pass|minor|major|fail --category <계열> --note '<한 줄>'` (H 없음·M만 = minor, H 있음 = major, 다시 짜야 함 = fail). 라우터가 그 작업을 맡았던 모델 점수에 반영한다. **차단(major·fail)이면 원인 계열을 꼭 적는다**(같은 구조적 원인이면 같은 이름. 예: 영역분리, CLI차단, 승인무결성) — 정지 점검이 이것으로 '범위 결정 필요'를 낸다.

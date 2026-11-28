@@ -100,6 +100,21 @@ def slots_dir(repo):
     return (gd if gd.is_absolute() else Path(repo) / gd).resolve() / "orca-kit" / "slots"
 
 
+def log_event(repo, kind, task="", **fields):
+    """전이 이력(append-only): orchestration/state/events.jsonl 한 줄 {ts, kind, task, ...}. 현재 상태만 남는 tasks.yaml을 보완한다
+    (되짚기·지표). 쓰기 실패는 무시한다(기록 때문에 운영이 멈추지 않게)."""
+    import time as _t
+    try:
+        p = Path(repo) / "orchestration" / "state" / "events.jsonl"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        rec = {"ts": _t.strftime("%Y-%m-%dT%H:%M:%S"), "kind": kind, "task": task}
+        rec.update({k: v for k, v in fields.items() if v not in (None, "")})
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
 # Orca worker-list의 state 중 '끝난' 것. 나머지(running 등)는 진행 중으로 본다.
 SETTLED_WORKER_STATES = {"succeeded", "failed", "abandoned", "stopped", "cancelled", "canceled"}
 

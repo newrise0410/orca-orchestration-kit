@@ -156,9 +156,15 @@ v0.1의 교훈 요약은 [`README.md`](../README.md) 4장, 일반화 판단과 �
 - **규칙:** (1) 긴 명령은 프로세스 묶음 전체에 시간 제한을 거는 도우미로 한 번의 호출에 돌리고 요약만 본다. 제한에 걸리면 SIGABRT로 스택을 남긴다. (2) 시간 제한 없는 배경 명령을 둔 채 턴을 끝내지 않는다. (3) 전체 시험은 병합 때 한 번, 구현은 마지막 커밋에서 한 번, 검토는 반례·지정 확인만. (4) 매니저를 깨우는 길은 워커 보고만이 아니어야 한다: 예약 점검이 '긴 명령'·'확인 창 대기'·'커밋 없음'으로도 깨운다. (5) 작업은 문맥이 기준을 넘기 전에 끝나는 크기로 자른다(비용 ≈ 호출 수 × 문맥, 길이의 제곱에 가깝다).
 - **반영 위치:** `tools/run_logged.sh`, `templates/AGENTS.md` 셸 명령, `worker-spec.md` 산출물·긴 명령, `review-spec.md` 시험 실행, `launch.py` review.recheck_effort_step, `status.py` 긴 명령·확인 창 대기·문맥 큼, `quota_watch.py`(`stall_watch.py`) watch.*, `usage.py`, `models.py quota` 계정별, MANAGER.md 2·3·4장.
 
+## L-24. 판단이 필요 없는 전이를 LLM 매니저에게 맡기면 비싸고 빠뜨린다 (2026-11-28, LangGraph 비교)
+- **현상:** 매니저가 worker_done마다 같은 수순(보고 읽기 → status 바꾸기 → 검토 투입, 검토 보고 읽기 → 실적 기록 → 지적 정리 → 보완 투입, 차단 횟수 세기)을 손으로 밟았다. 판단할 것이 없는 수순인데 호출마다 큰 문맥을 다시 읽었고(현장 매니저 6시간 3,200만 토큰), 할당 누락·실적 기록 누락·계열 이름 흔들림이 생겼다. 같은 문제를 푸는 LangGraph는 엣지를 코드로 두고 사람의 판단이 필요한 곳에만 `interrupt`를 건다.
+- **규칙:** (1) 다음 단계가 보고 내용만으로 정해지는 전이는 도구가 한다. 매니저는 도구가 남긴 판단 거리만 처리한다. (2) 도구가 읽을 수 있게 보고 첫 줄을 고정한다. 형식이 없으면 추측하지 않고 판단으로 넘긴다. (3) 전이는 현재 상태만이 아니라 이력으로 남긴다. (4) 같은 전이가 두 번 일어나지 않게(처리한 메일, 기대한 상태, 뒤따른 투입) 막는다.
+- **반영 위치:** `tools/advance.py`(kit.yaml `flow.*`), worker-spec·review-spec '종료'의 첫 줄 꼴, `task_status.set_field`(hold), `kitlib.log_event` → `state/events.jsonl`(launch·task_status·models feedback·quota_switch·advance), MANAGER.md 2·3장, procedures/review.md 2, DESIGN-NOTES 12장.
+
 ## 개정이력
 | 판 | 일자 | 내용 |
 |---|---|---|
+| v0.12.0 | 2026-11-28 | L-24 추가 |
 | v0.11.0 | 2026-11-26 | L-23 추가 |
 | v0.9.0 | 2026-11-25 | L-22 추가 |
 | v0.8.5 | 2026-11-25 | L-21 추가 |

@@ -333,6 +333,8 @@ def main(argv=None):
                                    agent, str(model or ""), str(effort or ""), rkey, rdiff, rjev]) + "\n")
             if mode == "new" and tid in active:
                 tpath.write_text(task_status.set_status(tpath.read_text(encoding="utf-8"), tid, "running"), encoding="utf-8")
+            kitlib.log_event(repo, "dispatch", tid, mode=mode, did=did, title=title, agent=agent, model=str(model or ""),
+                             effort=str(effort or ""), route=rkey)
             acct = (routing.read_accounts(repo).get(agent) or {}).get("active")   # 이 워커가 뜬 계정(Orca에서 고른 계정)
             if acct:
                 with open(repo / "orchestration/state/dispatch_accounts.tsv", "a", encoding="utf-8") as f:

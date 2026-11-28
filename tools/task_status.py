@@ -14,8 +14,14 @@ import kitlib  # noqa: E402
 
 
 def set_status(text, tid, status):
+    return set_field(text, tid, "status", status)
+
+
+def set_field(text, tid, key, value):
+    """작업 tid의 key 값을 바꾸거나 넣는다(주석·서식 보존). status 말고 hold 같은 칸에도 쓴다(값은 YAML 그대로 들어간다)."""
     lines = text.split("\n")
     id_re = re.compile(r"^(\s*)-\s*(\{\s*)?id:\s*['\"]?" + re.escape(tid) + r"['\"]?\s*(,|$|\})")
+    kv = re.compile(r"(?<![\w-])" + re.escape(key) + r":\s*(\"[^\"]*\"|'[^']*'|[^,}#\s][^,}#]*?)?(?=\s*(,|\}|#|$))")
     for i, ln in enumerate(lines):
         m = id_re.match(ln)
         if not m:
@@ -23,26 +29,31 @@ def set_status(text, tid, status):
         if m.group(2):  # 흐름형: 같은 줄(또는 닫는 } 까지)
             j = i
             while j < len(lines):
-                if re.search(r"status:\s*\w+", lines[j]):
-                    lines[j] = re.sub(r"status:\s*\w+", f"status: {status}", lines[j], count=1)
+                if kv.search(lines[j]):
+                    lines[j] = kv.sub(lambda _m: f"{key}: {value}", lines[j], count=1)
                     return "\n".join(lines)
                 if "}" in lines[j]:
-                    break
+                    k = lines[j].rindex("}")
+                    lines[j] = lines[j][:k].rstrip() + f", {key}: {value}" + lines[j][k:]
+                    return "\n".join(lines)
                 j += 1
-            raise SystemExit(f"{tid}: status 필드를 찾지 못했다(흐름형)")
+            raise SystemExit(f"{tid}: 흐름형 항목의 끝(}})을 찾지 못했다")
         indent = len(m.group(1))
         j = i + 1
         while j < len(lines):
             l2 = lines[j]
-            if re.match(r"^\s*-\s", l2) and len(l2) - len(l2.lstrip()) <= indent:
+            if (re.match(r"^\s*-\s", l2) and len(l2) - len(l2.lstrip()) <= indent) or (l2.strip() and len(l2) - len(l2.lstrip()) <= indent):
                 break
-            sm = re.match(r"^(\s*)status:\s*\S+(.*)$", l2)
+            sm = re.match(r"^(\s*)" + re.escape(key) + r":\s*\S*(.*)$", l2)
             if sm:
-                lines[j] = f"{sm.group(1)}status: {status}{sm.group(2) if sm.group(2).strip().startswith('#') else ''}"
+                tail = sm.group(2) if sm.group(2).strip().startswith("#") else ""
+                lines[j] = f"{sm.group(1)}{key}: {value}{tail}"
                 return "\n".join(lines)
             j += 1
-        # status 줄이 없으면 항목 끝에 추가
-        lines.insert(j, " " * (indent + 2) + f"status: {status}")
+        # 그 칸이 없으면 항목 끝에 추가(뒤 빈 줄 앞)
+        while j > i + 1 and not lines[j - 1].strip():
+            j -= 1
+        lines.insert(j, " " * (indent + 2) + f"{key}: {value}")
         return "\n".join(lines)
     raise SystemExit(f"작업 ID {tid}를 찾지 못했다")
 
@@ -57,6 +68,7 @@ def main(argv=None):
     p = kitlib.tasks_path(repo, kitlib.load_config(repo, a.config), a.tasks)
     with kitlib.locked(repo):
         p.write_text(set_status(p.read_text(encoding="utf-8"), a.id, a.status), encoding="utf-8")
+    kitlib.log_event(repo, "status", a.id, status=a.status)
     print(f"{a.id}: status {a.status}")
     return 0
 

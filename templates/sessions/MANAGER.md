@@ -53,6 +53,7 @@
 | int/common → {{MAIN_BRANCH}} 반영·전파 | `orchestration/tools/sync_main.sh [--all] [--push]` (체크아웃을 바꾸지 않는다. 원격은 `--push`일 때만) |
 | 끝난 워크트리 정리 | `python3 orchestration/tools/worktree_sweep.py` (미리 보기) → `--apply`. launch.sh가 한 시간에 한 번 저절로 한다(kit.yaml `cleanup.auto_sweep`). '확인 필요'는 이유를 보고 처리: 커밋하지 않은 변경·머지 안 된 커밋은 워커에 묻거나 보존, 주인 없는 것은 `--orphans`(메인에 다 들어 있을 때만) |
 | 머지 뒤 하나만 정리 | `orchestration/tools/cleanup_worker.sh <워크트리> <브랜치> <상위 브랜치>` (네 조건) |
+| **worker_done이 오면 먼저** | `python3 orchestration/tools/advance.py` — 정해진 전이(구현 통과 → 검토 투입, 검토 차단 → 실적·보완 투입, 같은 계열 2회 → hold)는 도구가 하고 `[판단]` 줄만 남긴다. `--dry-run`으로 미리 본다 |
 | 긴 명령(시간 제한·한 번의 호출) | `orchestration/tools/run_logged.sh <초> <로그> -- <명령>` (병합 확인의 빌드·전체 시험·스모크도) |
 | 작업별 토큰(호출 수 × 문맥) | `python3 orchestration/tools/usage.py --since 6h` (지표 문서의 작업별 행) |
 | 전체 시험 동시 수 제한 | `orchestration/tools/slot.sh test -- <시험 명령>` (줄은 status.py의 '슬롯 대기'·'슬롯 줄', 수는 kit.yaml `slots.test`) |
@@ -77,6 +78,7 @@
 - **투입 전에 약속을 닫는다(L-22).** L1·L2 작업은 tasks.yaml에 `guarantees`(보장하는 것)와 `out_of_scope`(범위 밖)를 닫힌 목록으로 적고 낸다(`validate_dag.py`가 없으면 경고, '언제나·모든·완전히' 같은 열린 약속도 경고). 검토는 그 목록 안에서만 차단한다. 기능이 빠지거나 뒤로 가는 축소는 작업마다 묻지 않고 한 번에 묶어 마스터에 올린다.
 - **같은 계열 차단 2회면 범위 결정(L-22).** 검토 판정에 계열을 남기고(`models.py feedback … --category`), 정지 점검의 '범위 결정 필요'가 나오면 고치기를 한 번 더 내지 말고 범위 선택지를 올린다(`procedures/review.md` 3).
 - **핵심 약속 점검표(L-22).** 검토가 되풀이해 잡는 지적은 `orchestration/checklist.md` '항목'에 넣는다. 구현·보완·이어받기 명세에 붙고, 워커는 항목마다 시험 이름을 보고한다. 목표: 첫 검토 차단 0~1건.
+- **정해진 전이는 도구에 맡긴다(L-24).** worker_done을 받으면 `advance.py`부터 돌리고 `[판단]` 줄(병합 관문, 범위 결정, 부분 완료의 다음 차수, 형식 없는 보고, 실패)만 처리한다. `[자동]`으로 끝난 것을 손으로 다시 하지 않는다(같은 검토·보완이 두 번 뜬다). 끄려면 kit.yaml `flow.auto_review`·`flow.auto_retry`. 전이 이력은 `orchestration/state/events.jsonl`.
 - **결함 수정과 새 기능을 한 작업에 섞지 않는다(L-10).** 수정 → 머지 → 검토를 먼저 끝내고 새 기능은 별도 작업으로 낸다.
 - **대형 구현은 미리 쪼갠다(L-13, L-23).** 한 작업은 워커의 문맥이 기준(`status.context_warn_k`, 기본 30만 토큰)을 넘기 전에 끝나는 크기로 자른다. 비용은 호출 수 × 그때의 문맥이라 작업 길이의 제곱에 가깝게 는다(현장: 한 작업이 호출당 45만 토큰을 읽어 구현 셋을 합친 만큼 썼다). 정지 점검의 '문맥 큼'이 그 신호다. 작업별 실측은 `usage.py`. 한 세션이 소화하는 양은 경험상 4묶음 안팎이다. 크면 차수(`<ID>a`, `<ID>b`)로 낸다. '부분 완료' 보고가 오면 남은 목록으로 다음 차수를 낸다.
 - **통합 세션의 머지 거부를 존중한다.** L1이 스모크 실패로 되돌리면 원인을 붙여 req 워커에 보완을 낸다(`--retry`).
