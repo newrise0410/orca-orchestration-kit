@@ -451,7 +451,10 @@ if a.startswith("automations show"): out({"ok": True, "result": {"automation": {
 if a.startswith("automations remove") or a.startswith("automations edit"): out({"ok": True, "result": {}})
 if a.startswith("automations runs"):
     st = os.environ.get("FAKE_SW_RUNS", "skipped_precheck")
-    out({"ok": True, "result": {"runs": [{"id": "r1", "status": st, "scheduledFor": 9999999999999}]}})
+    run = {"id": "r1", "status": st, "scheduledFor": 9999999999999, "dispatchedAt": None}
+    if st == "completed":   # 에이전트를 띄운 실행(Orca 실제 꼴: dispatchedAt·terminalSessionId)
+        run.update(dispatchedAt=9999999999999, terminalSessionId="term_x")
+    out({"ok": True, "result": {"runs": [run]}})
 if "task-create" in a: out({"ok": True, "result": {"id": "task_abc777"}})
 if "worker-start" in a:
     if os.environ.get("FAKE_SW_START_FAIL"):
@@ -525,6 +528,8 @@ o=$($SW python3 $T/quota_watch.py install --every 10 2>&1)
 check "watch install: Orca 예약 실행(10분, 사전 확인 절대 경로) 등록·기록" bash -c 'grep -q "등록: .* (auto-1)" <<<"$0" && grep -q -- "automations create .*--trigger \*/10 \* \* \* \* .*--precheck cd .* && ORCA_CLI_COMMAND=.* orchestration/tools/quota_watch.py precheck" "$1/calls.log" && grep -q auto-1 orchestration/state/quota_watch.json' "$o" "$W/sw"
 o=$($SW python3 $T/quota_watch.py install 2>&1); check "watch install: 이미 있으면 다시 만들지 않음" has "$o" "이미 등록됨"
 : > "$W/sw/calls.log"
+FAKE_SW_RUNS=dispatching $SW python3 $T/quota_watch.py precheck
+check "watch 안전장치: 사전 확인 중인 자기 실행(dispatching, 아직 띄우지 않음)으로는 끄지 않는다" bash -c '! grep -q "automations edit --id auto-1 --disabled" "$0/calls.log" && ! grep -q guard_disabled orchestration/state/quota_watch.json' "$W/sw"
 FAKE_SW_RUNS=completed $SW python3 $T/quota_watch.py precheck; rc=$?
 check "watch 안전장치: 예약 실행이 에이전트를 띄웠으면 스스로 끄고 알린다(사전 확인은 그래도 1)" bash -c 'test "$2" = 1 && grep -q "automations edit --id auto-1 --disabled" "$1/calls.log" && grep -q "subject 한도 점검 예약을 껐다" "$1/calls.log" && grep -q guard_disabled orchestration/state/quota_watch.json' "" "$W/sw" "$rc"
 o=$($SW python3 $T/quota_watch.py remove 2>&1); check "watch remove" bash -c 'grep -q "지움: auto-1" <<<"$0" && ! grep -q auto-1 orchestration/state/quota_watch.json' "$o"

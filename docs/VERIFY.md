@@ -258,6 +258,10 @@ v0.4.1(10장)에서 snap 설치본은 작업 폴더 신뢰 확인 창에 막혔�
 - 시험 165/165(이전 157 + 8): 이메일 도메인(example.com·하위 도메인 통과, notexample.com 걸림), pre-push(설정 못 읽으면 막고 이유 출력, `KIT_HOOK_NO_CONFIG_OK=1`이면 통과), cleanup(둘째 쪽 워커 목록의 진행 중 디스패치로 보류, `--cursor` 호출), launch(JSON `result.task.id`로 Task ID — 출력 속 다른 `task_…` 문자열에 속지 않음, worker-start 실패면 `task-update --status failed --result cancelled`), 쓰기 잠금(두 스레드가 차례로, 잠금 파일은 .gitignore), quota_watch 안전장치(실행 기록에 completed가 있으면 `automations edit --disabled`와 매니저 알림, 사전 확인은 그래도 1).
 - 시험이 잡은 시험 결함: pre-push 시험이 상대 경로로 훅을 불러 `cd` 뒤 파일을 못 찾았고, '막는다' 시험은 그 오류(종료코드 2)로 잘못 통과하고 있었다. 절대 경로로 부르고 막은 이유 문구까지 확인한다.
 
+## 30. v0.12.2: 예약 점검 안전장치 오판 (2026-11-28)
+- 실제 Orca: 벤치 저장소에 설치한 예약 점검의 첫 실행 기록은 `skipped_precheck`(사전 확인 종료코드 1, `dispatchedAt` 없음)인데, 사전 확인 안에서 본 같은 실행은 `dispatching`이었다 → 안전장치가 그것을 '에이전트를 띄운 실행'으로 세어 예약을 껐다(`guard_status: dispatching`). 이 결함은 v0.9.1부터 있었다.
+- 시험 208/208(이전 207 + 1): 가짜 Orca 실행 기록 `dispatching`(dispatchedAt 없음)으로는 끄지 않고, `completed`(dispatchedAt·terminalSessionId)이면 끈다.
+
 ## 29. v0.12.1: 효과 지표와 전이 실패 처리 (2026-11-28)
 - 시험 207/207(이전 204 + 3): 가짜 Orca의 worker-start 실패 → advance가 status를 running 그대로 두고 `[판단]`에 `tools/launch.sh --review X-AD`를 적는다(검토 dispatch 없음). metrics: 'Merge req/X-AD(전이 시험) → int/api' 병합 커밋에서 처리 시간, 보완 1·검토 2·판정 major 2, advance [자동] 3·[판단] 4, X-SW 이어받기 7회, 표의 절 제목.
 - 실데이터(LIG, 지난 60일, 작업 105개): 처리 시간 중앙값 0.8시간·p90 6.4시간(94개, 그중 52개는 병합 커밋이 없어 마지막 `[ID]` 커밋으로 어림, L1·게이트 3개 뺌), 겹침 배수 3.54(작업 기간 합 232시간 ÷ 열려 있던 66시간), 토큰 합계 6.7G·시험 관련 30%·병합 작업당 중앙값 19M. 처음 판은 병합 커밋 제목 `req/R-SWDS-SFR-009(보완…`과 `Merge L0-BOM12 …`를 놓쳐 76개가 비었고, 병합 시각을 모르는 작업을 '지금까지 열림'으로 세어 겹침 배수가 70이 나왔다 → 고쳤다.
